@@ -2,25 +2,8 @@ import React from 'react';
 import useAuth from '../hooks/useAuth';
 import { Package, Bell, Share2, Users, User, Shield, Building2, CheckCircle2 } from 'lucide-react';
 
-export const AddFoodPage = () => {
-  const { user } = useAuth();
-  return (
-    <div className="bg-white rounded-[16px] p-8 border border-[#E3E9E4] shadow-sm text-center max-w-2xl mx-auto space-y-4">
-      <div className="w-14 h-14 rounded-2xl bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center mx-auto">
-        <Package className="w-7 h-7" />
-      </div>
-      <h1 className="text-2xl font-bold text-[#17251E]">Food Inventory (Phase 2)</h1>
-      <p className="text-sm text-[#66736B] leading-relaxed">
-        This route is protected for <strong>{user?.full_name}</strong> in flat <strong>{user?.flat_number}</strong> ({user?.display_apartment_name}). 
-        Phase 2 will introduce complete food inventory tracking, purchase dates, and expiry monitoring.
-      </p>
-      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#F8FAF6] border border-[#E3E9E4] text-xs text-[#1F6F4A] font-semibold">
-        <CheckCircle2 className="w-4 h-4" />
-        <span>Authentication Verified</span>
-      </div>
-    </div>
-  );
-};
+export { AddFoodPage } from './AddFoodPage';
+
 
 export const AlertsPage = () => {
   const { user } = useAuth();
