@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import useFoods from '../hooks/useFoods';
+import consumptionService from '../services/consumptionService';
+import wasteService from '../services/wasteService';
 import { 
   Building2, 
   Home, 
@@ -26,7 +28,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Apple
+  Apple,
+  Utensils,
+  Flame
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -55,10 +59,11 @@ const STORAGE_OPTIONS = [
 ];
 
 const STATUS_OPTIONS = [
-  { value: 'ALL', label: 'All Statuses' },
+  { value: 'ALL', label: 'Active Pantry Items' },
   { value: 'AVAILABLE', label: 'Available / Good' },
   { value: 'EXPIRING_SOON', label: 'Expiring Soon' },
   { value: 'EXPIRED', label: 'Expired' },
+  { value: 'CONSUMED', label: 'Consumed History' },
 ];
 
 const SORT_OPTIONS = [
@@ -67,6 +72,14 @@ const SORT_OPTIONS = [
   { value: 'name', label: 'Name (A-Z)' },
   { value: '-created_at', label: 'Recently Added' },
   { value: '-quantity', label: 'Highest Quantity' },
+];
+
+const WASTE_REASONS = [
+  { value: 'EXPIRED', label: 'Expired' },
+  { value: 'SPOILED', label: 'Spoiled / Moldy' },
+  { value: 'BOUGHT_TOO_MUCH', label: 'Bought Too Much' },
+  { value: 'NOT_CONSUMED', label: 'Leftover / Not Consumed' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 export const HomePage = () => {
@@ -92,6 +105,7 @@ export const HomePage = () => {
     setStatus,
     ordering,
     setOrdering,
+    refreshAll,
     updateFoodItem,
     deleteFoodItem
   } = useFoods();
@@ -111,6 +125,79 @@ export const HomePage = () => {
   // Delete Modal State
   const [deletingItem, setDeletingItem] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Consume Modal State
+  const [consumingItem, setConsumingItem] = useState(null);
+  const [consumeQuantity, setConsumeQuantity] = useState('');
+  const [consumeNotes, setConsumeNotes] = useState('');
+  const [consumeSubmitting, setConsumeSubmitting] = useState(false);
+  const [consumeError, setConsumeError] = useState('');
+
+  // Waste Modal State
+  const [wastingItem, setWastingItem] = useState(null);
+  const [wasteQuantity, setWasteQuantity] = useState('');
+  const [wasteReason, setWasteReason] = useState('EXPIRED');
+  const [wasteDescription, setWasteDescription] = useState('');
+  const [wasteSubmitting, setWasteSubmitting] = useState(false);
+  const [wasteError, setWasteError] = useState('');
+
+  const handleOpenConsume = (item) => {
+    setConsumingItem(item);
+    setConsumeQuantity(item.quantity ? String(item.quantity) : '1');
+    setConsumeNotes('');
+    setConsumeError('');
+  };
+
+  const handleSaveConsume = async (e) => {
+    e.preventDefault();
+    if (!consumingItem) return;
+    setConsumeSubmitting(true);
+    setConsumeError('');
+
+    try {
+      await consumptionService.consumeFood(consumingItem.id, {
+        quantity: parseFloat(consumeQuantity),
+        notes: consumeNotes
+      });
+      setConsumingItem(null);
+      refreshAll();
+    } catch (err) {
+      const errData = err.response?.data;
+      setConsumeError(errData?.error || errData?.message || errData?.quantity?.[0] || 'Failed to record consumption.');
+    } finally {
+      setConsumeSubmitting(false);
+    }
+  };
+
+  const handleOpenWaste = (item) => {
+    setWastingItem(item);
+    setWasteQuantity(item.quantity ? String(item.quantity) : '1');
+    setWasteReason('EXPIRED');
+    setWasteDescription('');
+    setWasteError('');
+  };
+
+  const handleSaveWaste = async (e) => {
+    e.preventDefault();
+    if (!wastingItem) return;
+    setWasteSubmitting(true);
+    setWasteError('');
+
+    try {
+      await wasteService.wasteFood(wastingItem.id, {
+        quantity: parseFloat(wasteQuantity),
+        waste_reason: wasteReason,
+        description: wasteDescription
+      });
+      setWastingItem(null);
+      refreshAll();
+    } catch (err) {
+      const errData = err.response?.data;
+      setWasteError(errData?.error || errData?.message || errData?.quantity?.[0] || 'Failed to record waste.');
+    } finally {
+      setWasteSubmitting(false);
+    }
+  };
 
   const handleOpenEdit = (item) => {
     setEditingItem(item);
@@ -165,6 +252,14 @@ export const HomePage = () => {
 
   // Helper for Status Badge Styling
   const renderStatusBadge = (itemStatus, daysLeft) => {
+    if (itemStatus === 'CONSUMED') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-[#EBF3FE] text-[#2563EB] border border-[#2563EB]/30 px-2.5 py-0.5 rounded-full">
+          <Utensils className="w-3 h-3" />
+          <span>Consumed</span>
+        </span>
+      );
+    }
     if (itemStatus === 'EXPIRED' || (daysLeft !== undefined && daysLeft < 0)) {
       return (
         <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-[#FDF2F2] text-[#D9534F] border border-[#F8B4B4]/40 px-2.5 py-0.5 rounded-full">
@@ -601,29 +696,58 @@ export const HomePage = () => {
                 </div>
 
                 {/* Bottom Actions Row */}
-                <div className="flex items-center justify-between pt-3 border-t border-[#E3E9E4]">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#E3E9E4]">
                   
-                  {/* Inline Share Placeholder Button (Navigates to Share Food or tooltip) */}
-                  <button
-                    onClick={() => navigate('/share-food')}
-                    className="flex items-center gap-1.5 text-xs text-[#2563EB] font-semibold hover:bg-[#EBF3FE] px-2.5 py-1 rounded-[8px] transition-colors"
-                    title="Share surplus food with neighbors (Phase 4 Ready)"
-                  >
-                    <Share2 className="w-3.5 h-3.5" />
-                    <span>Share</span>
-                  </button>
-
-                  <div className="flex items-center gap-1">
+                  {/* Action Group: Consume & Waste OR Restock */}
+                  {item.status === 'CONSUMED' ? (
                     <button
                       onClick={() => handleOpenEdit(item)}
-                      className="p-1.5 rounded-[8px] text-[#66736B] hover:text-[#1F6F4A] hover:bg-[#DCEFE3] transition-colors"
+                      className="flex items-center gap-1 text-[11px] font-semibold text-[#2563EB] bg-[#EBF3FE] hover:bg-[#d8e6fd] px-2.5 py-1 rounded-[8px] transition-colors"
+                      title="Restock or Edit Quantity"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>Restock / Edit Quantity</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleOpenConsume(item)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-[#1F6F4A] bg-[#DCEFE3] hover:bg-[#c8e6d3] px-2.5 py-1 rounded-[8px] transition-colors"
+                        title="Log Consumption"
+                      >
+                        <Utensils className="w-3.5 h-3.5" />
+                        <span>Consume</span>
+                      </button>
+                      <button
+                        onClick={() => handleOpenWaste(item)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-[#D9534F] bg-[#FDF2F2] hover:bg-[#fbdada] px-2.5 py-1 rounded-[8px] transition-colors"
+                        title="Log Food Waste"
+                      >
+                        <Flame className="w-3.5 h-3.5" />
+                        <span>Waste</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Secondary Actions: Share, Edit, Delete */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => navigate('/share-food')}
+                      className="p-1 rounded-[8px] text-[#2563EB] hover:bg-[#EBF3FE] transition-colors"
+                      title="Share surplus food with neighbors (Phase 4)"
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenEdit(item)}
+                      className="p-1 rounded-[8px] text-[#66736B] hover:text-[#1F6F4A] hover:bg-[#DCEFE3] transition-colors"
                       title="Edit Item"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setDeletingItem(item)}
-                      className="p-1.5 rounded-[8px] text-[#66736B] hover:text-[#D9534F] hover:bg-[#FDF2F2] transition-colors"
+                      className="p-1 rounded-[8px] text-[#66736B] hover:text-[#D9534F] hover:bg-[#FDF2F2] transition-colors"
                       title="Delete Item"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -799,6 +923,179 @@ export const HomePage = () => {
                 {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Delete Item'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONSUME FOOD MODAL */}
+      {consumingItem && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-[16px] max-w-md w-full p-6 border border-[#E3E9E4] shadow-xl space-y-4 animate-fade-in">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center">
+                  <Utensils className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#17251E]">Consume Food Item</h3>
+                  <p className="text-[11px] text-[#66736B]">Log consumed quantity for {consumingItem.name}</p>
+                </div>
+              </div>
+              <button onClick={() => setConsumingItem(null)} className="p-1 rounded-lg text-[#66736B] hover:bg-[#F8FAF6]">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {consumeError && (
+              <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium">
+                {consumeError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveConsume} className="space-y-4">
+              <div className="p-3 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] flex items-center justify-between text-xs">
+                <span className="text-[#66736B]">Available in Pantry:</span>
+                <span className="font-bold text-[#17251E]">{consumingItem.quantity} {consumingItem.unit}</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#17251E] block">
+                  Quantity Consumed ({consumingItem.unit})
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={consumingItem.quantity}
+                  value={consumeQuantity}
+                  onChange={(e) => setConsumeQuantity(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-sm text-[#17251E] focus:outline-none focus:border-[#1F6F4A]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#17251E] block">Notes (Optional)</label>
+                <input
+                  type="text"
+                  value={consumeNotes}
+                  onChange={(e) => setConsumeNotes(e.target.value)}
+                  placeholder="e.g., Used for dinner salad"
+                  className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-[#E3E9E4] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConsumingItem(null)}
+                  className="px-4 py-2 rounded-[10px] border border-[#E3E9E4] text-xs font-semibold text-[#66736B]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={consumeSubmitting}
+                  className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center gap-2"
+                >
+                  {consumeSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log Consumption'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* WASTE FOOD MODAL */}
+      {wastingItem && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-[16px] max-w-md w-full p-6 border border-[#E3E9E4] shadow-xl space-y-4 animate-fade-in">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#FDF2F2] text-[#D9534F] flex items-center justify-center">
+                  <Flame className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#17251E]">Log Food Waste</h3>
+                  <p className="text-[11px] text-[#66736B]">Record wasted quantity for {wastingItem.name}</p>
+                </div>
+              </div>
+              <button onClick={() => setWastingItem(null)} className="p-1 rounded-lg text-[#66736B] hover:bg-[#F8FAF6]">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {wasteError && (
+              <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium">
+                {wasteError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveWaste} className="space-y-4">
+              <div className="p-3 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] flex items-center justify-between text-xs">
+                <span className="text-[#66736B]">Available in Pantry:</span>
+                <span className="font-bold text-[#17251E]">{wastingItem.quantity} {wastingItem.unit}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-[#17251E] block">
+                    Quantity Wasted
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={wastingItem.quantity}
+                    value={wasteQuantity}
+                    onChange={(e) => setWasteQuantity(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-sm text-[#17251E] focus:outline-none focus:border-[#D9534F]"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-[#17251E] block">Waste Reason</label>
+                  <select
+                    value={wasteReason}
+                    onChange={(e) => setWasteReason(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#D9534F]"
+                  >
+                    {WASTE_REASONS.map(r => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#17251E] block">Description / Reason Details</label>
+                <input
+                  type="text"
+                  value={wasteDescription}
+                  onChange={(e) => setWasteDescription(e.target.value)}
+                  placeholder="e.g., Forgotten in back of fridge"
+                  className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#D9534F]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-[#E3E9E4] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWastingItem(null)}
+                  className="px-4 py-2 rounded-[10px] border border-[#E3E9E4] text-xs font-semibold text-[#66736B]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={wasteSubmitting}
+                  className="px-4 py-2 rounded-[10px] bg-[#D9534F] hover:bg-[#c9302c] text-white text-xs font-semibold flex items-center gap-2"
+                >
+                  {wasteSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log Waste'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

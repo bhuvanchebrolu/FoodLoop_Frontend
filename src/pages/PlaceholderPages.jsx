@@ -3,27 +3,7 @@ import useAuth from '../hooks/useAuth';
 import { Package, Bell, Share2, Users, User, Shield, Building2, CheckCircle2 } from 'lucide-react';
 
 export { AddFoodPage } from './AddFoodPage';
-
-
-export const AlertsPage = () => {
-  const { user } = useAuth();
-  return (
-    <div className="bg-white rounded-[16px] p-8 border border-[#E3E9E4] shadow-sm text-center max-w-2xl mx-auto space-y-4">
-      <div className="w-14 h-14 rounded-2xl bg-[#FFF4E5] text-[#E6A23C] flex items-center justify-center mx-auto">
-        <Bell className="w-7 h-7" />
-      </div>
-      <h1 className="text-2xl font-bold text-[#17251E]">Expiry Alerts (Phase 3)</h1>
-      <p className="text-sm text-[#66736B] leading-relaxed">
-        Smart expiry notifications for items approaching their expiration date. 
-        Protected endpoint session active for <strong>{user?.email}</strong>.
-      </p>
-      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#F8FAF6] border border-[#E3E9E4] text-xs text-[#E6A23C] font-semibold">
-        <CheckCircle2 className="w-4 h-4" />
-        <span>Alert System Prepared</span>
-      </div>
-    </div>
-  );
-};
+export { AlertsPage } from './AlertsPage';
 
 export const ShareFoodPage = () => {
   const { user } = useAuth();

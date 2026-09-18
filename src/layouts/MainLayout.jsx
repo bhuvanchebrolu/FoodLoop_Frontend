@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
+import notificationService from '../services/notificationService';
 import { 
   Home, 
   Package, 
@@ -13,13 +14,57 @@ import {
   Share2,
   Menu,
   X,
-  ChevronRight
+  ChevronRight,
+  Check,
+  CheckCheck,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 
 const MainLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Notification State
+  const [notifDrawerOpen, setNotifDrawerOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const data = await notificationService.getNotifications({ page_size: 5 });
+      setNotifications(data.results || []);
+      setUnreadCount(data.unread_count || 0);
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000); // 30s polling
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const handleMarkRead = async (id) => {
+    try {
+      await notificationService.markAsRead(id);
+      fetchNotifications();
+    } catch (err) {
+      console.error('Error marking notification read:', err);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationService.markAllAsRead();
+      fetchNotifications();
+    } catch (err) {
+      console.error('Error marking all notifications read:', err);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -29,7 +74,7 @@ const MainLayout = () => {
   const navItems = [
     { label: 'Home', path: '/home', icon: Home, badge: null },
     { label: 'Inventory', path: '/add-food', icon: Package, badge: 'Phase 2' },
-    { label: 'Alerts', path: '/alerts', icon: Bell, badge: 'Phase 3' },
+    { label: 'Alerts', path: '/alerts', icon: Bell, badge: unreadCount > 0 ? `${unreadCount}` : 'Phase 3' },
     { label: 'Share Food', path: '/share-food', icon: Share2, badge: 'Phase 4' },
     { label: 'Community', path: '/community', icon: Users, badge: 'Phase 5' },
     { label: 'Profile', path: '/profile', icon: User, badge: null },
@@ -49,13 +94,29 @@ const MainLayout = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 rounded-xl text-[#17251E] bg-[#F8FAF6] border border-[#E3E9E4] focus:outline-none"
-          aria-label="Toggle Navigation Menu"
-        >
-          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Mobile Bell Icon */}
+          <button
+            onClick={() => setNotifDrawerOpen(!notifDrawerOpen)}
+            className="p-2 rounded-xl text-[#17251E] bg-[#F8FAF6] border border-[#E3E9E4] relative"
+            aria-label="View Notifications"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#D9534F] text-white text-[10px] font-bold flex items-center justify-center">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 rounded-xl text-[#17251E] bg-[#F8FAF6] border border-[#E3E9E4] focus:outline-none"
+            aria-label="Toggle Navigation Menu"
+          >
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </header>
 
       {/* Backdrop overlay for mobile menu */}
@@ -72,8 +133,8 @@ const MainLayout = () => {
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } h-screen`}
       >
-        {/* Top Brand Header */}
-        <div className="p-6 border-b border-[#E3E9E4]">
+        {/* Top Brand Header & Bell Trigger */}
+        <div className="p-6 border-b border-[#E3E9E4] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#174F37] to-[#1F6F4A] flex items-center justify-center text-white shadow-md">
               <Leaf className="w-6 h-6 text-[#DCEFE3]" />
@@ -118,7 +179,11 @@ const MainLayout = () => {
                     </div>
 
                     {item.badge ? (
-                      <span className="text-[10px] font-semibold bg-[#F8FAF6] text-[#66736B] border border-[#E3E9E4] px-2 py-0.5 rounded-full">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        item.path === '/alerts' && unreadCount > 0
+                          ? 'bg-[#D9534F] text-white'
+                          : 'bg-[#F8FAF6] text-[#66736B] border border-[#E3E9E4]'
+                      }`}>
                         {item.badge}
                       </span>
                     ) : (
@@ -135,19 +200,35 @@ const MainLayout = () => {
         <div className="p-4 border-t border-[#E3E9E4] bg-[#F8FAF6]/50">
           
           {/* User Info Card */}
-          <div className="bg-white p-3 rounded-[12px] border border-[#E3E9E4] mb-3 flex items-center gap-3 shadow-xs">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#174F37] to-[#1F6F4A] text-white font-bold flex items-center justify-center shrink-0">
-              {user?.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+          <div className="bg-white p-3 rounded-[12px] border border-[#E3E9E4] mb-3 flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#174F37] to-[#1F6F4A] text-white font-bold flex items-center justify-center shrink-0">
+                {user?.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-[#17251E] truncate">
+                  {user?.full_name || 'Resident'}
+                </p>
+                <p className="text-[11px] text-[#66736B] truncate flex items-center gap-1 mt-0.5">
+                  <Building2 className="w-3 h-3 text-[#7FAF8A] shrink-0" />
+                  <span className="truncate">{user?.display_apartment_name}</span>
+                </p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-[#17251E] truncate">
-                {user?.full_name || 'Resident'}
-              </p>
-              <p className="text-[11px] text-[#66736B] truncate flex items-center gap-1 mt-0.5">
-                <Building2 className="w-3 h-3 text-[#7FAF8A] shrink-0" />
-                <span className="truncate">{user?.display_apartment_name}</span>
-              </p>
-            </div>
+
+            {/* Desktop Notification Bell Button */}
+            <button
+              onClick={() => setNotifDrawerOpen(!notifDrawerOpen)}
+              className="p-2 rounded-xl text-[#17251E] hover:bg-[#F8FAF6] border border-[#E3E9E4] relative shrink-0"
+              title="Notifications"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#D9534F] text-white text-[9px] font-bold flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Sign Out Button */}
@@ -161,6 +242,77 @@ const MainLayout = () => {
 
         </div>
       </aside>
+
+      {/* NOTIFICATION DROPDOWN DRAWER */}
+      {notifDrawerOpen && (
+        <div className="fixed top-16 right-4 md:left-68 md:top-auto md:bottom-20 z-50 w-80 sm:w-96 bg-white rounded-[16px] border border-[#E3E9E4] shadow-xl p-4 space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-[#1F6F4A]" />
+              <h3 className="text-sm font-bold text-[#17251E]">Notifications</h3>
+              {unreadCount > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#D9534F] text-white">
+                  {unreadCount} unread
+                </span>
+              )}
+            </div>
+            
+            {unreadCount > 0 && (
+              <button
+                onClick={handleMarkAllRead}
+                className="text-[11px] text-[#1F6F4A] hover:underline font-semibold flex items-center gap-1"
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                <span>Mark all read</span>
+              </button>
+            )}
+          </div>
+
+          <div className="max-h-72 overflow-y-auto space-y-2">
+            {notifications.length === 0 ? (
+              <p className="text-xs text-[#66736B] text-center py-6">No notifications yet.</p>
+            ) : (
+              notifications.map((n) => (
+                <div
+                  key={n.id}
+                  className={`p-3 rounded-[10px] border text-xs transition-colors flex items-start justify-between gap-2 ${
+                    !n.is_read
+                      ? 'bg-[#DCEFE3]/30 border-[#7FAF8A]/40'
+                      : 'bg-[#F8FAF6] border-[#E3E9E4]'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <span className="font-bold text-[#17251E] block">{n.title}</span>
+                    <p className="text-[11px] text-[#66736B] leading-snug">{n.message}</p>
+                    <span className="text-[9px] text-[#98A39D] block">
+                      {new Date(n.created_at).toLocaleString()}
+                    </span>
+                  </div>
+
+                  {!n.is_read && (
+                    <button
+                      onClick={() => handleMarkRead(n.id)}
+                      className="p-1 rounded bg-white text-[#1F6F4A] border border-[#7FAF8A]/40 hover:bg-[#DCEFE3] shrink-0"
+                      title="Mark read"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-[#E3E9E4] text-center">
+            <button
+              onClick={() => { setNotifDrawerOpen(false); navigate('/alerts'); }}
+              className="text-xs font-semibold text-[#1F6F4A] hover:underline"
+            >
+              View All Alerts & Expiry Radar →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MAIN VIEWPORT CONTENT */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full min-h-[calc(100vh-60px)] md:min-h-screen flex flex-col justify-between">
