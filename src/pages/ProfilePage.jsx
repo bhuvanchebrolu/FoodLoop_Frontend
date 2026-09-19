@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import useAuth from '../hooks/useAuth';
 import authService from '../services/authService';
+import shareService from '../services/shareService';
 import { 
   User, 
   Building2, 
@@ -13,13 +14,35 @@ import {
   Bell, 
   Eye, 
   Mail,
-  Home
+  Home,
+  Share2,
+  Heart,
+  PackageCheck
 } from 'lucide-react';
 
 export const ProfilePage = () => {
   const { user, userSettings, updateProfile, fetchSettings, updateSettings } = useAuth();
 
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'settings'
+
+  // Impact Stats
+  const [userSharesCount, setUserSharesCount] = useState(0);
+  const [completedSharesCount, setCompletedSharesCount] = useState(0);
+
+  useEffect(() => {
+    const loadSharingStats = async () => {
+      try {
+        const data = await shareService.getMyShares();
+        const list = data.results || data || [];
+        setUserSharesCount(list.length);
+        const completed = list.filter(s => s.status === 'COMPLETED' || s.status === 'CLAIMED');
+        setCompletedSharesCount(completed.length);
+      } catch (err) {
+        console.error('Failed to load profile sharing stats:', err);
+      }
+    };
+    loadSharingStats();
+  }, []);
 
   // Profile Form state
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -164,9 +187,19 @@ export const ProfilePage = () => {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-[#66736B] font-medium">{user?.email}</p>
-            <div className="inline-flex items-center gap-1.5 text-xs text-[#1F6F4A] font-semibold bg-[#F8FAF6] border border-[#E3E9E4] px-3 py-1 rounded-full">
-              <Building2 className="w-3.5 h-3.5 text-[#7FAF8A]" />
-              <span>{user?.display_apartment_name} • Flat {user?.flat_number || 'N/A'}</span>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="inline-flex items-center gap-1.5 text-xs text-[#1F6F4A] font-semibold bg-[#F8FAF6] border border-[#E3E9E4] px-3 py-1 rounded-full">
+                <Building2 className="w-3.5 h-3.5 text-[#7FAF8A]" />
+                <span>{user?.display_apartment_name} • Flat {user?.flat_number || 'N/A'}</span>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-[#DCEFE3] text-[#1F6F4A] px-2.5 py-1 rounded-full border border-[#7FAF8A]/40">
+                <Share2 className="w-3 h-3" />
+                <span>{userSharesCount} Shared</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-[#EBF3FE] text-[#2563EB] px-2.5 py-1 rounded-full border border-[#2563EB]/30">
+                <PackageCheck className="w-3 h-3" />
+                <span>{completedSharesCount} Completed</span>
+              </span>
             </div>
           </div>
         </div>

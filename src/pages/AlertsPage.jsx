@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import alertService from '../services/alertService';
 import consumptionService from '../services/consumptionService';
 import wasteService from '../services/wasteService';
@@ -11,6 +12,7 @@ import {
   Loader2, 
   Utensils, 
   Flame, 
+  Share2,
   X, 
   Package, 
   Calendar, 
@@ -35,6 +37,7 @@ const WASTE_REASONS = [
 ];
 
 export const AlertsPage = () => {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   
@@ -426,22 +429,30 @@ export const AlertsPage = () => {
 
                 </div>
 
-                {/* Card Action Buttons: Consume / Waste */}
+                {/* Card Action Buttons: Consume / Share / Waste */}
                 <div className="flex items-center justify-between pt-3 border-t border-[#E3E9E4] gap-2">
                   <button
                     onClick={() => handleOpenConsume(item)}
-                    className="flex-1 py-1.5 rounded-[8px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    className="flex-1 py-1.5 rounded-[8px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center justify-center gap-1 transition-colors"
                   >
                     <Utensils className="w-3.5 h-3.5" />
                     <span>Consume</span>
                   </button>
 
                   <button
+                    onClick={() => navigate(`/share-food?food_id=${item.id}`)}
+                    className="flex-1 py-1.5 rounded-[8px] bg-[#EBF3FE] hover:bg-[#d8e6fd] text-[#2563EB] text-xs font-semibold flex items-center justify-center gap-1 border border-[#2563EB]/20 transition-colors"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share</span>
+                  </button>
+
+                  <button
                     onClick={() => handleOpenWaste(item)}
-                    className="flex-1 py-1.5 rounded-[8px] bg-[#FDF2F2] hover:bg-[#fbdada] text-[#D9534F] text-xs font-semibold flex items-center justify-center gap-1.5 border border-[#F8B4B4]/40 transition-colors"
+                    className="flex-1 py-1.5 rounded-[8px] bg-[#FDF2F2] hover:bg-[#fbdada] text-[#D9534F] text-xs font-semibold flex items-center justify-center gap-1 border border-[#F8B4B4]/40 transition-colors"
                   >
                     <Flame className="w-3.5 h-3.5" />
-                    <span>Mark Wasted</span>
+                    <span>Waste</span>
                   </button>
                 </div>
 

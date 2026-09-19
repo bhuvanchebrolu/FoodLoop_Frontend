@@ -732,9 +732,9 @@ export const HomePage = () => {
                   {/* Secondary Actions: Share, Edit, Delete */}
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => navigate('/share-food')}
+                      onClick={() => navigate(`/share-food?food_id=${item.id}`)}
                       className="p-1 rounded-[8px] text-[#2563EB] hover:bg-[#EBF3FE] transition-colors"
-                      title="Share surplus food with neighbors (Phase 4)"
+                      title="Share surplus food with neighbors"
                     >
                       <Share2 className="w-4 h-4" />
                     </button>
