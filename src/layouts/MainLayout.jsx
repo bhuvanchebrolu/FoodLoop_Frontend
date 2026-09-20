@@ -18,7 +18,8 @@ import {
   Check,
   CheckCheck,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Shield
 } from 'lucide-react';
 
 const MainLayout = () => {
@@ -73,12 +74,16 @@ const MainLayout = () => {
 
   const navItems = [
     { label: 'Home', path: '/home', icon: Home, badge: null },
-    { label: 'Inventory', path: '/add-food', icon: Package, badge: 'Phase 2' },
-    { label: 'Alerts', path: '/alerts', icon: Bell, badge: unreadCount > 0 ? `${unreadCount}` : 'Phase 3' },
-    { label: 'Share Food', path: '/share-food', icon: Share2, badge: 'Phase 4' },
-    { label: 'Community', path: '/community', icon: Users, badge: 'Phase 5' },
+    { label: 'Inventory', path: '/add-food', icon: Package, badge: null },
+    { label: 'Alerts', path: '/alerts', icon: Bell, badge: unreadCount > 0 ? `${unreadCount}` : null },
+    { label: 'Share Food', path: '/share-food', icon: Share2, badge: null },
+    { label: 'Community', path: '/community', icon: Users, badge: null },
     { label: 'Profile', path: '/profile', icon: User, badge: null },
   ];
+
+  if (user?.role === 'ADMIN') {
+    navItems.push({ label: 'Admin', path: '/admin', icon: Shield, badge: 'Master' });
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAF6] flex flex-col md:flex-row font-sans text-[#17251E]">

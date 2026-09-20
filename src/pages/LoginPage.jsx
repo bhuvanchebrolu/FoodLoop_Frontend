@@ -80,6 +80,7 @@ const LoginPage = () => {
   const {
     register: registerSignIn,
     handleSubmit: handleSubmitSignIn,
+    setValue: setValueSignIn,
     formState: { errors: errorsSignIn, isSubmitting: isSubmittingSignIn },
     reset: resetSignIn
   } = useForm({
@@ -370,6 +371,26 @@ const LoginPage = () => {
                   <span>Sign In</span>
                 )}
               </button>
+
+              {/* Fixed Admin Credentials Quick Fill */}
+              <div className="p-3 bg-[#FEF3C7]/60 border border-[#FCD34D] rounded-[10px] space-y-1.5 text-xs text-[#D97706]">
+                <div className="font-bold flex items-center justify-between">
+                  <span>Fixed Master Admin Credentials:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setValueSignIn('email', 'admin@gmail.com');
+                      setValueSignIn('password', 'admin123');
+                    }}
+                    className="px-2 py-0.5 rounded-[6px] bg-[#D97706] text-white font-bold text-[10px] hover:bg-[#B45309] transition-colors"
+                  >
+                    Auto Fill
+                  </button>
+                </div>
+                <div className="font-mono text-[11px] text-[#17251E]">
+                  Email: <strong>admin@gmail.com</strong> | Password: <strong>admin123</strong>
+                </div>
+              </div>
 
               {/* Divider */}
               <div className="relative my-4">

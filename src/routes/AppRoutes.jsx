@@ -10,7 +10,8 @@ import {
   AlertsPage, 
   ShareFoodPage, 
   CommunityPage, 
-  ProfilePage 
+  ProfilePage,
+  AdminPage
 } from '../pages/PlaceholderPages';
 
 const AppRoutes = () => {
@@ -30,6 +31,14 @@ const AppRoutes = () => {
           <Route path="/share-food" element={<ShareFoodPage />} />
           <Route path="/community" element={<CommunityPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+        </Route>
+      </Route>
+
+      {/* Admin Only Protected Routes */}
+      <Route element={<ProtectedRoute adminOnly={true} />}>
+        <Route element={<MainLayout />}>
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/admin/*" element={<AdminPage />} />
         </Route>
       </Route>
 

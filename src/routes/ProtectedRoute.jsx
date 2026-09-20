@@ -3,8 +3,8 @@ import { Navigate, Outlet } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 
-const ProtectedRoute = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+const ProtectedRoute = ({ adminOnly = false }) => {
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -24,6 +24,10 @@ const ProtectedRoute = () => {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (adminOnly && user?.role !== 'ADMIN') {
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

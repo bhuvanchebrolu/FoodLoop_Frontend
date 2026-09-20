@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import shareService from '../services/shareService';
+import reportService from '../services/reportService';
 import useAuth from '../hooks/useAuth';
 import { 
   Users, 
@@ -23,7 +24,8 @@ import {
   RefreshCw,
   Heart,
   Send,
-  UserCheck
+  UserCheck,
+  Flag
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -50,33 +52,46 @@ export const CommunityPage = () => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('ALL');
 
-  const [shares, setShares] = useState([]);
+  // Data states
+  const [feedShares, setFeedShares] = useState([]);
   const [myShares, setMyShares] = useState([]);
   const [myRequests, setMyRequests] = useState([]);
+  const [savedShares, setSavedShares] = useState([]);
+  
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [actionError, setActionError] = useState('');
 
   // Request Modal State
-  const [requestingShare, setRequestingShare] = useState(null);
-  const [requestQuantity, setRequestQuantity] = useState('');
+  const [requestModalShare, setRequestModalShare] = useState(null);
+  const [requestQty, setRequestQty] = useState('');
   const [requestMessage, setRequestMessage] = useState('');
-  const [requestSubmitting, setRequestSubmitting] = useState(false);
-  const [requestError, setRequestError] = useState('');
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
-  // Complete Handover Confirmation Modal State
-  const [completingRequest, setCompletingRequest] = useState(null);
-  const [completingSubmitting, setCompletingSubmitting] = useState(false);
+  // Report Modal State
+  const [reportModalShare, setReportModalShare] = useState(null);
+  const [reportReason, setReportReason] = useState('INAPPROPRIATE_CONTENT');
+  const [reportDescription, setReportDescription] = useState('');
+  const [submittingReport, setSubmittingReport] = useState(false);
 
-  const fetchSharesData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const showNotification = (msg, isError = false) => {
+    if (isError) {
+      setActionError(msg);
+      setTimeout(() => setActionError(''), 4000);
+    } else {
+      setActionSuccess(msg);
+      setTimeout(() => setActionSuccess(''), 4000);
+    }
+  };
+
+  const loadData = useCallback(async () => {
     try {
+      setLoading(true);
+
       if (activeTab === 'feed') {
-        const params = {};
-        if (search.trim()) params.search = search.trim();
-        if (category !== 'ALL') params.category = category;
-        const data = await shareService.getShares(params);
-        setShares(data.results || data || []);
+        const data = await shareService.getCommunityShares({ search, category });
+        setFeedShares(data.results || data || []);
       } else if (activeTab === 'mine') {
         const data = await shareService.getMyShares();
         setMyShares(data.results || data || []);
@@ -84,680 +99,739 @@ export const CommunityPage = () => {
         const data = await shareService.getMyRequests();
         setMyRequests(data.results || data || []);
       } else if (activeTab === 'saved') {
-        const data = await shareService.getShares({ scope: 'saved' });
-        setShares(data.results || data || []);
+        const data = await shareService.getCommunityShares({ scope: 'saved' });
+        setSavedShares(data.results || data || []);
       }
     } catch (err) {
-      console.error('Failed to load community shares:', err);
-      setError('Unable to load community marketplace data.');
+      console.error('Failed to load marketplace data:', err);
+      showNotification('Failed to load marketplace items.', true);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [activeTab, search, category]);
 
   useEffect(() => {
-    fetchSharesData();
-  }, [fetchSharesData]);
+    loadData();
+  }, [loadData]);
 
-  const handleToggleSave = async (shareId) => {
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
+
+  const handleToggleFavorite = async (shareId) => {
     try {
-      await shareService.toggleSaveShare(shareId);
-      fetchSharesData();
+      const res = await shareService.toggleFavoriteShare(shareId);
+      showNotification(res.message);
+      
+      setFeedShares(prev => prev.map(item => 
+        item.id === shareId ? { ...item, is_saved: res.is_saved } : item
+      ));
+      
+      if (activeTab === 'saved' && !res.is_saved) {
+        setSavedShares(prev => prev.filter(item => item.id !== shareId));
+      }
     } catch (err) {
-      console.error('Failed to toggle save share:', err);
+      showNotification('Failed to update saved favorites.', true);
     }
   };
 
   const handleOpenRequestModal = (share) => {
-    setRequestingShare(share);
-    setRequestQuantity(share.quantity ? String(share.quantity) : '1');
+    setRequestModalShare(share);
+    setRequestQty(share.quantity.toString());
     setRequestMessage('');
-    setRequestError('');
   };
 
-  const handleSaveRequest = async (e) => {
+  const handleCreateRequestSubmit = async (e) => {
     e.preventDefault();
-    if (!requestingShare) return;
-    setRequestSubmitting(true);
-    setRequestError('');
+    if (!requestModalShare) return;
 
+    setSubmittingRequest(true);
     try {
-      await shareService.requestShare(requestingShare.id, {
-        quantity: parseFloat(requestQuantity),
+      const payload = {
+        quantity: parseFloat(requestQty),
         message: requestMessage
-      });
-      setRequestingShare(null);
-      fetchSharesData();
+      };
+
+      const res = await shareService.createShareRequest(requestModalShare.id, payload);
+      showNotification(res.message);
+      setRequestModalShare(null);
+      loadData();
     } catch (err) {
       const errData = err.response?.data;
-      setRequestError(errData?.message || errData?.quantity?.[0] || 'Failed to submit share request.');
+      showNotification(errData?.message || 'Failed to submit request.', true);
     } finally {
-      setRequestSubmitting(false);
-    }
-  };
-
-  const handleApproveRequest = async (requestId) => {
-    try {
-      await shareService.approveRequest(requestId);
-      fetchSharesData();
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to approve request.');
-    }
-  };
-
-  const handleRejectRequest = async (requestId) => {
-    try {
-      await shareService.rejectRequest(requestId);
-      fetchSharesData();
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to decline request.');
-    }
-  };
-
-  const handleCancelRequest = async (requestId) => {
-    try {
-      await shareService.cancelRequest(requestId);
-      fetchSharesData();
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to cancel request.');
+      setSubmittingRequest(false);
     }
   };
 
   const handleCancelShare = async (shareId) => {
     if (!window.confirm('Are you sure you want to cancel this food share?')) return;
     try {
-      await shareService.cancelShare(shareId);
-      fetchSharesData();
+      const res = await shareService.cancelFoodShare(shareId);
+      showNotification(res.message);
+      loadData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to cancel food share.');
+      showNotification('Failed to cancel share.', true);
     }
   };
 
-  const handleConfirmCompleteHandover = async () => {
-    if (!completingRequest) return;
-    setCompletingSubmitting(true);
+  const handleApproveRequest = async (requestId) => {
     try {
-      await shareService.completeRequest(completingRequest.id);
-      setCompletingRequest(null);
-      fetchSharesData();
+      const res = await shareService.approveShareRequest(requestId);
+      showNotification(res.message);
+      loadData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to complete handover.');
+      showNotification(err.response?.data?.message || 'Failed to approve request.', true);
+    }
+  };
+
+  const handleRejectRequest = async (requestId) => {
+    try {
+      const res = await shareService.rejectShareRequest(requestId);
+      showNotification(res.message);
+      loadData();
+    } catch (err) {
+      showNotification('Failed to reject request.', true);
+    }
+  };
+
+  const handleCompleteHandover = async (requestId) => {
+    if (!window.confirm('Confirm that food handover is complete?')) return;
+    try {
+      const res = await shareService.completeShareRequest(requestId);
+      showNotification(res.message);
+      loadData();
+    } catch (err) {
+      showNotification(err.response?.data?.message || 'Failed to complete handover.', true);
+    }
+  };
+
+  // Report submission handler
+  const handleOpenReportModal = (share) => {
+    setReportModalShare(share);
+    setReportReason('INAPPROPRIATE_CONTENT');
+    setReportDescription('');
+  };
+
+  const handleCreateReportSubmit = async (e) => {
+    e.preventDefault();
+    if (!reportModalShare) return;
+
+    setSubmittingReport(true);
+    try {
+      const payload = {
+        target_type: 'FOOD_SHARE',
+        target_id: reportModalShare.id.toString(),
+        reason: reportReason,
+        description: reportDescription
+      };
+
+      const res = await reportService.createReport(payload);
+      showNotification(res.message);
+      setReportModalShare(null);
+    } catch (err) {
+      const errData = err.response?.data;
+      const msg = errData?.errors?.non_field_errors?.[0] || errData?.message || 'Failed to submit report.';
+      showNotification(msg, true);
     } finally {
-      setCompletingSubmitting(false);
-    }
-  };
-
-  const renderStatusBadge = (status) => {
-    switch (status) {
-      case 'AVAILABLE':
-        return <span className="text-[11px] font-bold bg-[#DCEFE3] text-[#1F6F4A] px-2.5 py-0.5 rounded-full border border-[#7FAF8A]/40">Available</span>;
-      case 'PARTIALLY_CLAIMED':
-        return <span className="text-[11px] font-bold bg-[#FFF4E5] text-[#E6A23C] px-2.5 py-0.5 rounded-full border border-[#FFE0B2]">Partially Claimed</span>;
-      case 'CLAIMED':
-      case 'COMPLETED':
-        return <span className="text-[11px] font-bold bg-[#F8FAF6] text-[#66736B] px-2.5 py-0.5 rounded-full border border-[#E3E9E4]">Completed</span>;
-      case 'CANCELLED':
-        return <span className="text-[11px] font-bold bg-[#FDF2F2] text-[#D9534F] px-2.5 py-0.5 rounded-full border border-[#F8B4B4]/40">Cancelled</span>;
-      case 'EXPIRED':
-        return <span className="text-[11px] font-bold bg-[#F8FAF6] text-[#66736B] px-2.5 py-0.5 rounded-full border border-[#E3E9E4]">Expired</span>;
-      default:
-        return null;
-    }
-  };
-
-  const renderRequestStatusBadge = (status) => {
-    switch (status) {
-      case 'PENDING':
-        return <span className="text-[11px] font-bold bg-[#FFF4E5] text-[#E6A23C] px-2.5 py-0.5 rounded-full border border-[#FFE0B2]">Pending Approval</span>;
-      case 'APPROVED':
-        return <span className="text-[11px] font-bold bg-[#DCEFE3] text-[#1F6F4A] px-2.5 py-0.5 rounded-full border border-[#7FAF8A]/40">Approved</span>;
-      case 'REJECTED':
-        return <span className="text-[11px] font-bold bg-[#FDF2F2] text-[#D9534F] px-2.5 py-0.5 rounded-full border border-[#F8B4B4]/40">Declined</span>;
-      case 'CANCELLED':
-        return <span className="text-[11px] font-bold bg-[#F8FAF6] text-[#66736B] px-2.5 py-0.5 rounded-full border border-[#E3E9E4]">Cancelled</span>;
-      case 'COMPLETED':
-        return <span className="text-[11px] font-bold bg-[#EBF3FE] text-[#2563EB] px-2.5 py-0.5 rounded-full border border-[#2563EB]/30">Handover Complete</span>;
-      default:
-        return null;
+      setSubmittingReport(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-
-      {/* Top Banner Header */}
-      <div className="bg-gradient-to-r from-[#174F37] via-[#1F6F4A] to-[#2E8B57] text-white p-6 sm:p-8 rounded-[16px] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="relative z-10 space-y-2 max-w-xl">
-          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-[#DCEFE3] border border-white/20">
-            <Building2 className="w-3.5 h-3.5 text-[#E8B44F]" />
-            <span>{user?.display_apartment_name} • Flat {user?.flat_number || 'N/A'}</span>
+    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+      
+      {/* Header Banner */}
+      <div className="bg-[#17251E] text-white rounded-[16px] p-6 sm:p-8 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Community Food Sharing</h1>
+            <span className="bg-[#DCEFE3] text-[#1F6F4A] text-xs font-bold px-2.5 py-0.5 rounded-full border border-[#7FAF8A]/40">
+              {user?.display_apartment_name}
+            </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            Community Food Marketplace
-          </h1>
-          <p className="text-xs sm:text-sm text-[#DCEFE3]/90 leading-relaxed">
-            Discover surplus food shared by neighbors in your apartment building or offer your own surplus food.
+          <p className="text-xs sm:text-sm text-[#98A39D] max-w-xl">
+            Share unneeded surplus food with neighbors in your apartment building. Reduce waste, save money, and build community!
           </p>
         </div>
 
-        <div className="relative z-10 shrink-0">
+        <div className="flex items-center gap-3 w-full md:w-auto">
           <button
             onClick={() => navigate('/share-food')}
-            className="w-full sm:w-auto px-5 py-3 rounded-[12px] bg-white text-[#1F6F4A] hover:bg-[#DCEFE3] font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md group"
+            className="flex-1 md:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white font-semibold text-xs transition-all shadow-sm"
           >
-            <Plus className="w-4 h-4 transition-transform group-hover:scale-110" />
-            <span>Share Surplus Food</span>
+            <Plus className="w-4 h-4" />
+            <span>Share Food</span>
+          </button>
+          
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-2.5 rounded-[10px] bg-[#24352B] hover:bg-[#2F4438] text-white transition-colors border border-[#34483B]"
+            title="Refresh feed"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#7FAF8A]' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Navigation Scope Tabs */}
-      <div className="bg-white rounded-[16px] p-4 border border-[#E3E9E4] shadow-xs space-y-4">
-        <div className="flex items-center gap-2 border-b border-[#E3E9E4] pb-3 overflow-x-auto">
-          
+      {/* Action Notification Banners */}
+      {actionSuccess && (
+        <div className="p-4 rounded-[12px] bg-[#DCEFE3] border border-[#7FAF8A]/40 text-[#1F6F4A] text-xs font-medium flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{actionSuccess}</span>
+          </div>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="p-4 rounded-[12px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Main Tab Controls & Search Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-4 rounded-[16px] border border-[#E3E9E4] shadow-xs">
+        
+        {/* Navigation Tabs */}
+        <div className="flex items-center bg-[#F8FAF6] p-1 rounded-[12px] border border-[#E3E9E4] overflow-x-auto">
           <button
             onClick={() => setActiveTab('feed')}
-            className={`px-4 py-2 rounded-[10px] text-xs font-bold whitespace-nowrap transition-all ${
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'feed'
-                ? 'bg-[#1F6F4A] text-white shadow-xs'
-                : 'bg-[#F8FAF6] text-[#66736B] hover:bg-[#E3E9E4]/60 border border-[#E3E9E4]'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              <Users className="w-4 h-4" />
-              <span>Community Marketplace</span>
-            </span>
+            Marketplace Feed
           </button>
 
           <button
             onClick={() => setActiveTab('mine')}
-            className={`px-4 py-2 rounded-[10px] text-xs font-bold whitespace-nowrap transition-all ${
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'mine'
-                ? 'bg-[#1F6F4A] text-white shadow-xs'
-                : 'bg-[#F8FAF6] text-[#66736B] hover:bg-[#E3E9E4]/60 border border-[#E3E9E4]'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              <Share2 className="w-4 h-4" />
-              <span>My Shares</span>
-            </span>
+            My Shares
           </button>
 
           <button
             onClick={() => setActiveTab('requests')}
-            className={`px-4 py-2 rounded-[10px] text-xs font-bold whitespace-nowrap transition-all ${
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'requests'
-                ? 'bg-[#1F6F4A] text-white shadow-xs'
-                : 'bg-[#F8FAF6] text-[#66736B] hover:bg-[#E3E9E4]/60 border border-[#E3E9E4]'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              <MessageSquare className="w-4 h-4" />
-              <span>My Requests</span>
-            </span>
+            My Requests
           </button>
 
           <button
             onClick={() => setActiveTab('saved')}
-            className={`px-4 py-2 rounded-[10px] text-xs font-bold whitespace-nowrap transition-all ${
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'saved'
-                ? 'bg-[#1F6F4A] text-white shadow-xs'
-                : 'bg-[#F8FAF6] text-[#66736B] hover:bg-[#E3E9E4]/60 border border-[#E3E9E4]'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              <Bookmark className="w-4 h-4" />
-              <span>Saved Shares</span>
-            </span>
+            Saved Items
           </button>
-
         </div>
 
-        {/* Search & Category Filter Controls (Shown in Feed mode) */}
+        {/* Search & Category Filter (Feed Tab only) */}
         {activeTab === 'feed' && (
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
-            <div className="sm:col-span-8 relative">
-              <Search className="w-4 h-4 text-[#98A39D] absolute left-3.5 top-3" />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 sm:w-60">
+              <Search className="w-4 h-4 text-[#98A39D] absolute left-3 top-2.5" />
               <input
                 type="text"
+                placeholder="Search food shares..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search food shares by name, category, or details..."
-                className="w-full pl-9 pr-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
+                className="w-full pl-9 pr-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
               />
             </div>
 
-            <div className="sm:col-span-4">
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
-              >
-                {CATEGORY_OPTIONS.map(c => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
+            >
+              {CATEGORY_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
         )}
       </div>
 
-      {/* TAB 1: COMMUNITY MARKETPLACE FEED */}
-      {(activeTab === 'feed' || activeTab === 'saved') && (
-        <div className="bg-white rounded-[16px] p-6 border border-[#E3E9E4] shadow-xs space-y-6">
-          {loading ? (
-            <div className="py-16 flex flex-col items-center justify-center gap-2 text-[#1F6F4A]">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <span className="text-xs font-medium">Scanning community marketplace...</span>
-            </div>
-          ) : error ? (
-            <div className="p-4 rounded-[12px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium text-center">
-              {error}
-            </div>
-          ) : shares.length === 0 ? (
-            <div className="py-12 border border-dashed border-[#E3E9E4] rounded-[16px] text-center space-y-3 bg-[#F8FAF6]/50">
-              <div className="w-12 h-12 rounded-2xl bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center mx-auto">
-                <Users className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-[#17251E]">
-                {activeTab === 'saved' ? 'No Saved Shares' : 'No Community Shares Available'}
-              </h3>
-              <p className="text-xs text-[#66736B] max-w-sm mx-auto">
-                {activeTab === 'saved'
-                  ? 'Bookmark food shares you are interested in to find them here.'
-                  : 'No surplus food shares matched your search criteria. Be the first to share food!'}
-              </p>
-              {activeTab === 'feed' && (
+      {/* CONTENT AREA */}
+      {loading ? (
+        <div className="py-16 flex flex-col items-center justify-center gap-3 text-[#1F6F4A]">
+          <Loader2 className="w-8 h-8 animate-spin" />
+          <span className="text-xs font-medium">Loading community items...</span>
+        </div>
+      ) : (
+        <>
+          {/* TAB 1: MARKETPLACE FEED */}
+          {activeTab === 'feed' && (
+            feedShares.length === 0 ? (
+              <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-3">
+                <div className="w-12 h-12 rounded-full bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center mx-auto">
+                  <Share2 className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-[#17251E]">No Shared Food Available</h3>
+                <p className="text-xs text-[#66736B] max-w-sm mx-auto">
+                  There are currently no surplus food items available for request in your building feed. Be the first to share!
+                </p>
                 <button
                   onClick={() => navigate('/share-food')}
-                  className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold hover:bg-[#174F37]"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold"
                 >
-                  Share Food Item
+                  <Plus className="w-4 h-4" />
+                  <span>Share Food Item</span>
                 </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {shares.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-white rounded-[16px] border border-[#E3E9E4] p-5 shadow-xs hover:border-[#7FAF8A] transition-all flex flex-col justify-between space-y-4 group"
-                >
-                  <div>
-                    {/* Card Header */}
-                    <div className="flex items-start gap-3 mb-3">
-                      {item.food_photo_url ? (
-                        <img
-                          src={item.food_photo_url}
-                          alt={item.title}
-                          className="w-14 h-14 rounded-xl object-cover border border-[#E3E9E4] shrink-0"
-                        />
-                      ) : (
-                        <div className="w-14 h-14 rounded-xl bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center font-bold text-xl shrink-0">
-                          {item.title ? item.title.charAt(0).toUpperCase() : 'S'}
-                        </div>
-                      )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {feedShares.map((share) => {
+                  const isOwner = user && share.owner?.id === user.id;
+                  const isSaved = share.is_saved;
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider bg-[#DCEFE3] text-[#1F6F4A] px-2 py-0.5 rounded-full">
-                            {item.food_category}
+                  return (
+                    <div 
+                      key={share.id}
+                      className="bg-white rounded-[16px] border border-[#E3E9E4] shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden"
+                    >
+                      <div className="p-5 space-y-3">
+                        
+                        {/* Header Badge Row */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#DCEFE3] text-[#1F6F4A] border border-[#7FAF8A]/30">
+                            {share.food_item?.category || 'FOOD'}
                           </span>
-                          <button
-                            onClick={() => handleToggleSave(item.id)}
-                            className="p-1 text-[#66736B] hover:text-[#E8B44F] transition-colors"
-                            title={item.is_saved ? 'Remove Bookmark' : 'Save Share'}
-                          >
-                            {item.is_saved ? (
-                              <BookmarkCheck className="w-4 h-4 text-[#E8B44F] fill-[#E8B44F]" />
-                            ) : (
-                              <Bookmark className="w-4 h-4" />
+
+                          <div className="flex items-center gap-1">
+                            {/* Favorite Toggle Button */}
+                            <button
+                              onClick={() => handleToggleFavorite(share.id)}
+                              className="p-1.5 rounded-full hover:bg-[#F8FAF6] text-[#66736B] transition-colors"
+                              title={isSaved ? "Remove from saved" : "Save share"}
+                            >
+                              {isSaved ? (
+                                <BookmarkCheck className="w-4 h-4 text-[#1F6F4A] fill-[#1F6F4A]" />
+                              ) : (
+                                <Bookmark className="w-4 h-4" />
+                              )}
+                            </button>
+
+                            {/* Report Flag Button */}
+                            {!isOwner && (
+                              <button
+                                onClick={() => handleOpenReportModal(share)}
+                                className="p-1.5 rounded-full hover:bg-[#FDF2F2] text-[#98A39D] hover:text-[#D9534F] transition-colors"
+                                title="Report listing"
+                              >
+                                <Flag className="w-3.5 h-3.5" />
+                              </button>
                             )}
-                          </button>
+                          </div>
                         </div>
 
-                        <h3 className="text-sm font-bold text-[#17251E] truncate mt-1 group-hover:text-[#1F6F4A] transition-colors">
-                          {item.title}
-                        </h3>
+                        {/* Title & Description */}
+                        <div>
+                          <h3 className="text-base font-bold text-[#17251E] line-clamp-1">{share.title}</h3>
+                          <p className="text-xs text-[#66736B] mt-1 line-clamp-2">
+                            {share.description || share.food_item?.name || 'Surplus food item offered for sharing.'}
+                          </p>
+                        </div>
 
-                        <p className="text-xs font-bold text-[#1F6F4A] mt-0.5">
-                          {item.quantity} {item.unit} available
+                        {/* Quantity & Expiry Badges */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <div className="px-2.5 py-1 rounded-[8px] bg-[#F8FAF6] border border-[#E3E9E4] text-xs font-semibold text-[#17251E]">
+                            Available: <span className="text-[#1F6F4A]">{share.quantity} {share.unit}</span>
+                          </div>
+
+                          {share.food_item?.expiry_date && (
+                            <div className="flex items-center gap-1 text-[11px] text-[#D97706] font-medium px-2.5 py-1 rounded-[8px] bg-[#FEF3C7]/60 border border-[#FCD34D]/40">
+                              <Clock className="w-3 h-3" />
+                              <span>Expires: {share.food_item.expiry_date}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Owner & Building Info */}
+                        <div className="pt-2 border-t border-[#E3E9E4] flex items-center justify-between text-[11px] text-[#66736B]">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-5 h-5 rounded-full bg-[#1F6F4A] text-white flex items-center justify-center font-bold text-[9px]">
+                              {share.owner?.full_name ? share.owner.full_name.charAt(0) : 'U'}
+                            </div>
+                            <span>{share.owner?.full_name} (Flat {share.owner?.flat_number || 'N/A'})</span>
+                          </div>
+                        </div>
+
+                      </div>
+
+                      {/* Card Footer Action */}
+                      <div className="p-4 bg-[#F8FAF6] border-t border-[#E3E9E4]">
+                        {isOwner ? (
+                          <div className="text-center text-xs font-semibold text-[#66736B]">
+                            Your Shared Item
+                          </div>
+                        ) : share.has_active_request ? (
+                          <div className="w-full py-2 text-center text-xs font-semibold text-[#1F6F4A] bg-[#DCEFE3] rounded-[10px] border border-[#7FAF8A]/40 flex items-center justify-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Request Submitted</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleOpenRequestModal(share)}
+                            className="w-full py-2.5 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Request Food Share</span>
+                          </button>
+                        )}
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {/* TAB 2: MY SHARES */}
+          {activeTab === 'mine' && (
+            myShares.length === 0 ? (
+              <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-3">
+                <h3 className="text-base font-bold text-[#17251E]">No Shares Posted Yet</h3>
+                <p className="text-xs text-[#66736B]">You haven't posted any surplus food shares yet.</p>
+                <button
+                  onClick={() => navigate('/share-food')}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Share Food Now</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {myShares.map((share) => (
+                  <div key={share.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-[#17251E]">{share.title}</h3>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            share.status === 'AVAILABLE' ? 'bg-[#DCEFE3] text-[#1F6F4A]' :
+                            share.status === 'COMPLETED' ? 'bg-[#EBF3FE] text-[#2563EB]' : 'bg-[#FDF2F2] text-[#D9534F]'
+                          }`}>
+                            {share.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#66736B] mt-0.5">
+                          {share.quantity} {share.unit} remaining (Initial: {share.initial_quantity} {share.unit})
                         </p>
                       </div>
+
+                      {share.status !== 'CANCELLED' && share.status !== 'COMPLETED' && (
+                        <button
+                          onClick={() => handleCancelShare(share.id)}
+                          className="px-3 py-1.5 rounded-[8px] bg-[#FDF2F2] hover:bg-[#FEE2E2] text-[#D9534F] text-xs font-semibold border border-[#F8B4B4]/40"
+                        >
+                          Cancel Share
+                        </button>
+                      )}
                     </div>
 
-                    {item.description && (
-                      <p className="text-xs text-[#66736B] bg-[#F8FAF6] p-2.5 rounded-[10px] border border-[#E3E9E4] line-clamp-2 mb-3">
-                        "{item.description}"
-                      </p>
-                    )}
+                    {/* Incoming Requests Section */}
+                    {share.requests && share.requests.length > 0 && (
+                      <div className="pt-3 border-t border-[#E3E9E4] space-y-3">
+                        <h4 className="text-xs font-bold text-[#17251E] flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-[#1F6F4A]" />
+                          <span>Incoming Requests ({share.requests.length})</span>
+                        </h4>
 
-                    {/* Shared By details */}
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-[#66736B] pt-3 border-t border-[#E3E9E4]">
-                      <div>
-                        <span className="text-[#98A39D] block text-[10px] uppercase font-bold">Shared By</span>
-                        <span className="font-semibold text-[#17251E] truncate block">
-                          {item.owner_name} (Flat {item.owner_flat || 'N/A'})
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[#98A39D] block text-[10px] uppercase font-bold">Expiry Date</span>
-                        <span className="font-semibold text-[#17251E]">{item.expiry_date || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                    {item.pickup_note && (
-                      <p className="text-[11px] text-[#E6A23C] bg-[#FFF4E5] p-2 rounded-[8px] border border-[#FFE0B2] font-medium mt-2.5 truncate">
-                        📍 {item.pickup_note}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Action Row */}
-                  <div className="pt-3 border-t border-[#E3E9E4]">
-                    {item.is_owner ? (
-                      <div className="p-2 rounded-[8px] bg-[#F8FAF6] text-center text-xs text-[#66736B] font-semibold border border-[#E3E9E4]">
-                        Your Food Share
-                      </div>
-                    ) : item.user_request ? (
-                      <div className="p-2 rounded-[8px] bg-[#DCEFE3] text-center text-xs text-[#1F6F4A] font-semibold flex items-center justify-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Request {item.user_request.status}</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleOpenRequestModal(item)}
-                        className="w-full py-2.5 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors shadow-xs"
-                      >
-                        <Share2 className="w-4 h-4" />
-                        <span>Request Food</span>
-                      </button>
-                    )}
-                  </div>
-
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: MY SHARES */}
-      {activeTab === 'mine' && (
-        <div className="bg-white rounded-[16px] p-6 border border-[#E3E9E4] shadow-xs space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
-            <div>
-              <h2 className="text-base font-bold text-[#17251E]">My Food Shares</h2>
-              <p className="text-xs text-[#66736B]">Manage your active shares and approve incoming requests from neighbors.</p>
-            </div>
-            <button
-              onClick={() => navigate('/share-food')}
-              className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Share Food</span>
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="py-12 text-center text-[#1F6F4A]">
-              <Loader2 className="w-6 h-6 animate-spin mx-auto" />
-            </div>
-          ) : myShares.length === 0 ? (
-            <div className="py-10 text-center text-[#66736B] text-xs">
-              You haven't posted any food shares yet.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {myShares.map((share) => (
-                <div key={share.id} className="p-4 rounded-[16px] border border-[#E3E9E4] bg-[#F8FAF6] space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E3E9E4]">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-bold text-[#17251E]">{share.title}</h3>
-                        {renderStatusBadge(share.status)}
-                      </div>
-                      <p className="text-xs text-[#66736B] mt-0.5">
-                        Quantity Remaining: <strong className="text-[#17251E]">{share.quantity} {share.unit}</strong> (Initial: {share.initial_quantity} {share.unit})
-                      </p>
-                    </div>
-
-                    {share.status !== 'CANCELLED' && share.status !== 'COMPLETED' && (
-                      <button
-                        onClick={() => handleCancelShare(share.id)}
-                        className="px-3 py-1.5 rounded-[8px] bg-[#FDF2F2] hover:bg-[#fbdada] text-[#D9534F] text-xs font-semibold self-start sm:self-auto border border-[#F8B4B4]/40"
-                      >
-                        Cancel Share
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Incoming Requests Section */}
-                  <div className="space-y-2">
-                    <span className="text-xs font-bold text-[#17251E] block">
-                      Incoming Requests ({share.requests ? share.requests.length : 0})
-                    </span>
-
-                    {(!share.requests || share.requests.length === 0) ? (
-                      <p className="text-xs text-[#66736B] italic">No requests received yet for this share.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {share.requests.map((req) => (
-                          <div key={req.id} className="p-3 bg-white rounded-[12px] border border-[#E3E9E4] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-[#17251E]">{req.requester_name}</span>
-                                <span className="text-[#66736B]">(Flat {req.requester_flat || 'N/A'})</span>
-                                {renderRequestStatusBadge(req.status)}
+                        <div className="space-y-2">
+                          {share.requests.map((req) => (
+                            <div key={req.id} className="p-3 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <div className="text-xs font-bold text-[#17251E]">
+                                  {req.requester?.full_name} (Flat {req.requester?.flat_number})
+                                </div>
+                                <div className="text-[11px] text-[#66736B]">
+                                  Requested: <span className="font-semibold text-[#1F6F4A]">{req.quantity} {share.unit}</span>
+                                  {req.message && ` • "${req.message}"`}
+                                </div>
                               </div>
-                              <p className="text-[#66736B]">
-                                Requested <strong className="text-[#17251E]">{req.quantity} {share.unit}</strong>
-                                {req.message && <span> • "{req.message}"</span>}
-                              </p>
-                            </div>
 
-                            {/* Request Actions */}
-                            <div className="flex items-center gap-2">
-                              {req.status === 'PENDING' && (
-                                <>
+                              <div className="flex items-center gap-2">
+                                {req.status === 'PENDING' && (
+                                  <>
+                                    <button
+                                      onClick={() => handleApproveRequest(req.id)}
+                                      className="px-3 py-1.5 rounded-[8px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold"
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectRequest(req.id)}
+                                      className="px-3 py-1.5 rounded-[8px] bg-[#F8FAF6] hover:bg-[#E3E9E4] text-[#66736B] text-xs font-semibold border border-[#E3E9E4]"
+                                    >
+                                      Decline
+                                    </button>
+                                  </>
+                                )}
+
+                                {req.status === 'APPROVED' && (
                                   <button
-                                    onClick={() => handleApproveRequest(req.id)}
-                                    className="px-3 py-1.5 rounded-[8px] bg-[#1F6F4A] hover:bg-[#174F37] text-white font-semibold text-xs flex items-center gap-1"
+                                    onClick={() => handleCompleteHandover(req.id)}
+                                    className="px-3.5 py-1.5 rounded-[8px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs flex items-center gap-1"
                                   >
                                     <Check className="w-3.5 h-3.5" />
-                                    <span>Approve</span>
+                                    <span>Complete Handover</span>
                                   </button>
-                                  <button
-                                    onClick={() => handleRejectRequest(req.id)}
-                                    className="px-3 py-1.5 rounded-[8px] bg-[#FDF2F2] text-[#D9534F] hover:bg-[#fbdada] font-semibold text-xs border border-[#F8B4B4]/40"
-                                  >
-                                    Decline
-                                  </button>
-                                </>
-                              )}
+                                )}
 
-                              {req.status === 'APPROVED' && (
-                                <button
-                                  onClick={() => setCompletingRequest(req)}
-                                  className="px-3 py-1.5 rounded-[8px] bg-[#2563EB] hover:bg-[#1d4ed8] text-white font-semibold text-xs flex items-center gap-1"
-                                >
-                                  <UserCheck className="w-3.5 h-3.5" />
-                                  <span>Complete Handover</span>
-                                </button>
-                              )}
+                                {req.status === 'COMPLETED' && (
+                                  <span className="text-xs font-bold text-[#2563EB] bg-[#EBF3FE] px-2.5 py-1 rounded-full">
+                                    Handover Completed
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
-
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           )}
-        </div>
-      )}
 
-      {/* TAB 3: MY REQUESTS */}
-      {activeTab === 'requests' && (
-        <div className="bg-white rounded-[16px] p-6 border border-[#E3E9E4] shadow-xs space-y-6">
-          <div className="pb-3 border-b border-[#E3E9E4]">
-            <h2 className="text-base font-bold text-[#17251E]">My Outgoing Share Requests</h2>
-            <p className="text-xs text-[#66736B]">Track the status of food items you have requested from neighbors.</p>
-          </div>
-
-          {loading ? (
-            <div className="py-12 text-center text-[#1F6F4A]">
-              <Loader2 className="w-6 h-6 animate-spin mx-auto" />
-            </div>
-          ) : myRequests.length === 0 ? (
-            <div className="py-10 text-center text-[#66736B] text-xs">
-              You haven't requested any shared food yet. Browse the Marketplace to find food!
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {myRequests.map((req) => (
-                <div key={req.id} className="p-4 rounded-[14px] border border-[#E3E9E4] bg-[#F8FAF6] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-[#17251E]">{req.share_title}</h3>
-                      {renderRequestStatusBadge(req.status)}
+          {/* TAB 3: MY REQUESTS */}
+          {activeTab === 'requests' && (
+            myRequests.length === 0 ? (
+              <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-3">
+                <h3 className="text-base font-bold text-[#17251E]">No Active Requests</h3>
+                <p className="text-xs text-[#66736B]">You haven't requested any food shares from your community yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myRequests.map((req) => (
+                  <div key={req.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-[#17251E]">{req.share?.title}</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          req.status === 'APPROVED' ? 'bg-[#DCEFE3] text-[#1F6F4A]' :
+                          req.status === 'COMPLETED' ? 'bg-[#EBF3FE] text-[#2563EB]' :
+                          req.status === 'PENDING' ? 'bg-[#FEF3C7] text-[#D97706]' : 'bg-[#FDF2F2] text-[#D9534F]'
+                        }`}>
+                          {req.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#66736B]">
+                        Requested Quantity: <strong>{req.quantity} {req.share?.unit}</strong> from {req.share?.owner?.full_name} (Flat {req.share?.owner?.flat_number})
+                      </p>
                     </div>
-                    <p className="text-xs text-[#66736B] mt-1">
-                      Owner: <strong className="text-[#17251E]">{req.share_owner_name} (Flat {req.share_owner_flat || 'N/A'})</strong> • Quantity Requested: <strong className="text-[#17251E]">{req.quantity} {req.share_unit}</strong>
-                    </p>
-                    {req.message && (
-                      <p className="text-[11px] text-[#66736B] italic mt-0.5">"{req.message}"</p>
+
+                    {req.status === 'APPROVED' && (
+                      <button
+                        onClick={() => handleCompleteHandover(req.id)}
+                        className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold"
+                      >
+                        Confirm Received
+                      </button>
                     )}
                   </div>
-
-                  {req.status === 'PENDING' && (
-                    <button
-                      onClick={() => handleCancelRequest(req.id)}
-                      className="px-3 py-1.5 rounded-[8px] bg-white border border-[#E3E9E4] text-[#66736B] hover:bg-[#F8FAF6] text-xs font-semibold self-start sm:self-auto"
-                    >
-                      Cancel Request
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           )}
-        </div>
+
+          {/* TAB 4: SAVED ITEMS */}
+          {activeTab === 'saved' && (
+            savedShares.length === 0 ? (
+              <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-3">
+                <Bookmark className="w-8 h-8 text-[#98A39D] mx-auto" />
+                <h3 className="text-base font-bold text-[#17251E]">No Saved Food Shares</h3>
+                <p className="text-xs text-[#66736B]">Items you bookmark in the marketplace feed will appear here for quick access.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {savedShares.map((share) => (
+                  <div key={share.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#DCEFE3] text-[#1F6F4A]">
+                        {share.food_item?.category}
+                      </span>
+                      <button
+                        onClick={() => handleToggleFavorite(share.id)}
+                        className="p-1 rounded-full text-[#1F6F4A]"
+                      >
+                        <BookmarkCheck className="w-5 h-5 fill-[#1F6F4A]" />
+                      </button>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-[#17251E]">{share.title}</h3>
+                    <p className="text-xs text-[#1F6F4A] font-semibold">{share.quantity} {share.unit} available</p>
+
+                    <button
+                      onClick={() => handleOpenRequestModal(share)}
+                      className="w-full py-2 rounded-[8px] bg-[#1F6F4A] text-white text-xs font-semibold"
+                    >
+                      Request This Share
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </>
       )}
 
-      {/* REQUEST FOOD MODAL */}
-      {requestingShare && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-[16px] max-w-md w-full p-6 border border-[#E3E9E4] shadow-xl space-y-4 animate-fade-in">
+      {/* REQUEST MODAL */}
+      {requestModalShare && (
+        <div className="fixed inset-0 z-50 bg-[#17251E]/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <form onSubmit={handleCreateRequestSubmit} className="bg-white rounded-[20px] p-6 max-w-md w-full border border-[#E3E9E4] shadow-xl space-y-4 animate-scaleUp">
             <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center">
-                  <Share2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-[#17251E]">Request Food Share</h3>
-                  <p className="text-[11px] text-[#66736B]">Submit request to {requestingShare.owner_name}</p>
-                </div>
-              </div>
-              <button onClick={() => setRequestingShare(null)} className="p-1 rounded-lg text-[#66736B] hover:bg-[#F8FAF6]">
+              <h3 className="text-base font-bold text-[#17251E]">Request Food Share</h3>
+              <button type="button" onClick={() => setRequestModalShare(null)} className="text-[#66736B] hover:text-[#17251E]">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {requestError && (
-              <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium">
-                {requestError}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveRequest} className="space-y-4">
-              <div className="p-3 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] space-y-1 text-xs">
-                <span className="font-bold text-[#17251E] block">{requestingShare.title}</span>
-                <span className="text-[#66736B] block">Available: {requestingShare.quantity} {requestingShare.unit}</span>
+            <div className="space-y-3">
+              <div className="p-3 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] text-xs space-y-1">
+                <div className="font-bold text-[#17251E]">{requestModalShare.title}</div>
+                <div className="text-[#66736B]">Available: {requestModalShare.quantity} {requestModalShare.unit}</div>
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-[#17251E] block">
-                  Quantity Requested ({requestingShare.unit})
+                  Requested Quantity ({requestModalShare.unit})
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max={requestingShare.quantity}
-                  value={requestQuantity}
-                  onChange={(e) => setRequestQuantity(e.target.value)}
+                  max={requestModalShare.quantity}
+                  value={requestQty}
+                  onChange={(e) => setRequestQty(e.target.value)}
                   required
-                  className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-sm text-[#17251E] focus:outline-none focus:border-[#1F6F4A]"
+                  className="w-full px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A]"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[#17251E] block">Message to Owner (Optional)</label>
-                <input
-                  type="text"
+                <label className="text-xs font-semibold text-[#17251E] block">
+                  Message to Owner (Optional)
+                </label>
+                <textarea
                   value={requestMessage}
                   onChange={(e) => setRequestMessage(e.target.value)}
-                  placeholder="e.g., Hi! I can pick this up around 6 PM today."
-                  className="w-full px-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A]"
+                  placeholder="e.g. Hi! I can pick this up today around 6 PM."
+                  className="w-full px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] h-20"
                 />
               </div>
-
-              <div className="pt-3 border-t border-[#E3E9E4] flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRequestingShare(null)}
-                  className="px-4 py-2 rounded-[10px] border border-[#E3E9E4] text-xs font-semibold text-[#66736B]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={requestSubmitting}
-                  className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center gap-2"
-                >
-                  {requestSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Request'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* COMPLETE HANDOVER MODAL */}
-      {completingRequest && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-[16px] max-w-sm w-full p-6 border border-[#E3E9E4] shadow-xl text-center space-y-4 animate-fade-in">
-            <div className="w-12 h-12 rounded-2xl bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center mx-auto">
-              <UserCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-[#17251E]">Complete Food Handover?</h3>
-              <p className="text-xs text-[#66736B] mt-1">
-                Confirm that <strong className="text-[#17251E]">{completingRequest.quantity} {completingRequest.share_unit}</strong> of <strong className="text-[#17251E]">{completingRequest.share_title}</strong> has been handed over to <strong className="text-[#17251E]">{completingRequest.requester_name}</strong>.
-              </p>
             </div>
 
-            <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setCompletingRequest(null)}
-                className="px-4 py-2 rounded-[10px] border border-[#E3E9E4] bg-white text-xs font-semibold text-[#66736B]"
+                onClick={() => setRequestModalShare(null)}
+                className="px-4 py-2 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] text-xs font-semibold text-[#66736B]"
               >
                 Cancel
               </button>
               <button
-                type="button"
-                disabled={completingSubmitting}
-                onClick={handleConfirmCompleteHandover}
-                className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold flex items-center gap-1.5"
+                type="submit"
+                disabled={submittingRequest}
+                className="px-5 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold disabled:opacity-50"
               >
-                {completingSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Completion'}
+                {submittingRequest ? 'Submitting...' : 'Submit Request'}
               </button>
             </div>
-          </div>
+          </form>
+        </div>
+      )}
+
+      {/* REPORT MODAL */}
+      {reportModalShare && (
+        <div className="fixed inset-0 z-50 bg-[#17251E]/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <form onSubmit={handleCreateReportSubmit} className="bg-white rounded-[20px] p-6 max-w-md w-full border border-[#E3E9E4] shadow-xl space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E3E9E4]">
+              <h3 className="text-base font-bold text-[#17251E] flex items-center gap-2">
+                <Flag className="w-4 h-4 text-[#D9534F]" />
+                <span>Report Share Listing</span>
+              </h3>
+              <button type="button" onClick={() => setReportModalShare(null)} className="text-[#66736B] hover:text-[#17251E]">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-xs space-y-1">
+                <div className="font-bold text-[#17251E]">{reportModalShare.title}</div>
+                <div className="text-[#66736B]">Reported to community moderation team.</div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#17251E] block">Reason for Report</label>
+                <select
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E]"
+                >
+                  <option value="INAPPROPRIATE_CONTENT">Inappropriate Content</option>
+                  <option value="MISLEADING_LISTING">Misleading Listing</option>
+                  <option value="SPAM">Spam / Commercial Advertising</option>
+                  <option value="HARASSMENT">Harassment or Abuse</option>
+                  <option value="DUPLICATE">Duplicate Listing</option>
+                  <option value="OTHER">Other Safety Concern</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-[#17251E] block">Explanation / Details</label>
+                <textarea
+                  required
+                  value={reportDescription}
+                  onChange={(e) => setReportDescription(e.target.value)}
+                  placeholder="Please describe why this listing violates community standards..."
+                  className="w-full px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] h-24"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setReportModalShare(null)}
+                className="px-4 py-2 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] text-xs font-semibold text-[#66736B]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submittingReport}
+                className="px-5 py-2 rounded-[10px] bg-[#D9534F] hover:bg-[#C9302C] text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {submittingReport ? 'Submitting...' : 'Submit Report'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
