@@ -19,7 +19,8 @@ import {
   CheckCheck,
   Clock,
   AlertTriangle,
-  Shield
+  Shield,
+  TrendingUp
 } from 'lucide-react';
 
 const MainLayout = () => {
@@ -78,6 +79,7 @@ const MainLayout = () => {
     { label: 'Alerts', path: '/alerts', icon: Bell, badge: unreadCount > 0 ? `${unreadCount}` : null },
     { label: 'Share Food', path: '/share-food', icon: Share2, badge: null },
     { label: 'Community', path: '/community', icon: Users, badge: null },
+    { label: 'Analytics', path: '/analytics', icon: TrendingUp, badge: null },
     { label: 'Profile', path: '/profile', icon: User, badge: null },
   ];
 

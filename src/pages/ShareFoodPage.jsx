@@ -115,7 +115,16 @@ export const ShareFoodPage = () => {
       navigate('/community?scope=mine');
     } catch (err) {
       const errData = err.response?.data;
-      setError(errData?.message || errData?.quantity?.[0] || errData?.food_item_id?.[0] || 'Failed to create food share.');
+      let firstMsg = 'Failed to create food share.';
+      if (errData?.errors && typeof errData.errors === 'object') {
+        const firstVal = Object.values(errData.errors)[0];
+        firstMsg = Array.isArray(firstVal) ? firstVal[0] : String(firstVal);
+      } else if (errData?.message && errData.message !== 'Invalid share data.') {
+        firstMsg = errData.message;
+      } else if (errData?.detail) {
+        firstMsg = errData.detail;
+      }
+      setError(firstMsg);
     } finally {
       setSubmitting(false);
     }

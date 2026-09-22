@@ -6,6 +6,10 @@ export const shareService = {
     const response = await api.get('/shares/', { params });
     return response.data;
   },
+  getCommunityShares: async (params = {}) => {
+    const response = await api.get('/shares/', { params });
+    return response.data;
+  },
 
   // Create new food share
   createShare: async (shareData) => {
@@ -24,15 +28,27 @@ export const shareService = {
     const response = await api.post(`/shares/${id}/cancel/`);
     return response.data;
   },
+  cancelFoodShare: async (id) => {
+    const response = await api.post(`/shares/${id}/cancel/`);
+    return response.data;
+  },
 
   // Submit request for food share
   requestShare: async (id, requestData) => {
     const response = await api.post(`/shares/${id}/request/`, requestData);
     return response.data;
   },
+  createShareRequest: async (id, requestData) => {
+    const response = await api.post(`/shares/${id}/request/`, requestData);
+    return response.data;
+  },
 
   // Save / Unsave share to favorites
   toggleSaveShare: async (id) => {
+    const response = await api.post(`/shares/${id}/save/`);
+    return response.data;
+  },
+  toggleFavoriteShare: async (id) => {
     const response = await api.post(`/shares/${id}/save/`);
     return response.data;
   },
@@ -49,14 +65,28 @@ export const shareService = {
     return response.data;
   },
 
+  // Get current user's incoming requests across all owned shares
+  getIncomingRequests: async () => {
+    const response = await api.get('/shares/incoming-requests/');
+    return response.data;
+  },
+
   // Approve a share request
   approveRequest: async (requestId) => {
+    const response = await api.post(`/shares/requests/${requestId}/approve/`);
+    return response.data;
+  },
+  approveShareRequest: async (requestId) => {
     const response = await api.post(`/shares/requests/${requestId}/approve/`);
     return response.data;
   },
 
   // Reject a share request
   rejectRequest: async (requestId) => {
+    const response = await api.post(`/shares/requests/${requestId}/reject/`);
+    return response.data;
+  },
+  rejectShareRequest: async (requestId) => {
     const response = await api.post(`/shares/requests/${requestId}/reject/`);
     return response.data;
   },
@@ -69,6 +99,10 @@ export const shareService = {
 
   // Complete handover for an approved request
   completeRequest: async (requestId) => {
+    const response = await api.post(`/shares/requests/${requestId}/complete/`);
+    return response.data;
+  },
+  completeShareRequest: async (requestId) => {
     const response = await api.post(`/shares/requests/${requestId}/complete/`);
     return response.data;
   },

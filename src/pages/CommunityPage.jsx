@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import shareService from '../services/shareService';
 import reportService from '../services/reportService';
 import useAuth from '../hooks/useAuth';
@@ -25,7 +25,9 @@ import {
   Heart,
   Send,
   UserCheck,
-  Flag
+  Flag,
+  Inbox,
+  ArrowRight
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -46,9 +48,11 @@ const CATEGORY_OPTIONS = [
 
 export const CommunityPage = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'feed';
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('feed'); // 'feed' | 'mine' | 'requests' | 'saved'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'feed' | 'incoming' | 'requests' | 'mine' | 'saved'
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('ALL');
 
@@ -56,6 +60,7 @@ export const CommunityPage = () => {
   const [feedShares, setFeedShares] = useState([]);
   const [myShares, setMyShares] = useState([]);
   const [myRequests, setMyRequests] = useState([]);
+  const [incomingRequests, setIncomingRequests] = useState([]);
   const [savedShares, setSavedShares] = useState([]);
   
   const [loading, setLoading] = useState(true);
@@ -67,6 +72,7 @@ export const CommunityPage = () => {
   const [requestModalShare, setRequestModalShare] = useState(null);
   const [requestQty, setRequestQty] = useState('');
   const [requestMessage, setRequestMessage] = useState('');
+  const [requestModalError, setRequestModalError] = useState('');
   const [submittingRequest, setSubmittingRequest] = useState(false);
 
   // Report Modal State
@@ -85,6 +91,11 @@ export const CommunityPage = () => {
     }
   };
 
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -95,6 +106,9 @@ export const CommunityPage = () => {
       } else if (activeTab === 'mine') {
         const data = await shareService.getMyShares();
         setMyShares(data.results || data || []);
+      } else if (activeTab === 'incoming') {
+        const data = await shareService.getIncomingRequests();
+        setIncomingRequests(data.results || data || []);
       } else if (activeTab === 'requests') {
         const data = await shareService.getMyRequests();
         setMyRequests(data.results || data || []);
@@ -113,7 +127,28 @@ export const CommunityPage = () => {
 
   useEffect(() => {
     loadData();
+    // Fetch incoming and outgoing request counts indicator
+    Promise.all([
+      shareService.getIncomingRequests().catch(() => ({ results: [] })),
+      shareService.getMyRequests().catch(() => ({ results: [] }))
+    ]).then(([incData, myReqData]) => {
+      if (incData) setIncomingRequests(incData.results || incData || []);
+      if (myReqData) setMyRequests(myReqData.results || myReqData || []);
+    });
   }, [loadData]);
+
+  // Compute incoming requests for owner across all owned shares
+  const allIncomingRequests = incomingRequests.length > 0 ? incomingRequests : myShares.flatMap(share => 
+    (share.requests || []).map(req => ({
+      ...req,
+      share_id: req.share_id || share.id,
+      share_title: req.share_title || share.title,
+      share_unit: req.share_unit || share.unit,
+      share_pickup_note: share.pickup_note
+    }))
+  );
+  const pendingIncomingCount = allIncomingRequests.filter(r => r.status === 'PENDING').length;
+  const activeOutgoingCount = myRequests.filter(r => r.status === 'PENDING' || r.status === 'APPROVED').length;
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -141,6 +176,7 @@ export const CommunityPage = () => {
     setRequestModalShare(share);
     setRequestQty(share.quantity.toString());
     setRequestMessage('');
+    setRequestModalError('');
   };
 
   const handleCreateRequestSubmit = async (e) => {
@@ -148,6 +184,7 @@ export const CommunityPage = () => {
     if (!requestModalShare) return;
 
     setSubmittingRequest(true);
+    setRequestModalError('');
     try {
       const payload = {
         quantity: parseFloat(requestQty),
@@ -155,12 +192,16 @@ export const CommunityPage = () => {
       };
 
       const res = await shareService.createShareRequest(requestModalShare.id, payload);
-      showNotification(res.message);
+      showNotification(res.message || 'Request submitted successfully!');
       setRequestModalShare(null);
+      // Automatically switch to 'My Outgoing Requests' tab so requester immediately sees their request status!
+      handleTabChange('requests');
       loadData();
     } catch (err) {
       const errData = err.response?.data;
-      showNotification(errData?.message || 'Failed to submit request.', true);
+      const errMsg = errData?.message || errData?.quantity?.[0] || 'Failed to submit request.';
+      setRequestModalError(errMsg);
+      showNotification(errMsg, true);
     } finally {
       setSubmittingRequest(false);
     }
@@ -302,7 +343,7 @@ export const CommunityPage = () => {
         {/* Navigation Tabs */}
         <div className="flex items-center bg-[#F8FAF6] p-1 rounded-[12px] border border-[#E3E9E4] overflow-x-auto">
           <button
-            onClick={() => setActiveTab('feed')}
+            onClick={() => handleTabChange('feed')}
             className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'feed'
                 ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
@@ -313,7 +354,45 @@ export const CommunityPage = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('mine')}
+            onClick={() => handleTabChange('incoming')}
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+              activeTab === 'incoming'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
+            }`}
+          >
+            <Inbox className="w-3.5 h-3.5 text-[#1F6F4A]" />
+            <span>Incoming Requests</span>
+            {pendingIncomingCount > 0 && (
+              <span className="bg-[#D9534F] text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                {pendingIncomingCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => handleTabChange('requests')}
+            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+              activeTab === 'requests'
+                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
+                : 'text-[#66736B] hover:text-[#17251E]'
+            }`}
+          >
+            <Send className="w-3.5 h-3.5 text-[#1F6F4A]" />
+            <span>My Outgoing Requests</span>
+            {myRequests.length > 0 && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                activeOutgoingCount > 0
+                  ? 'bg-[#1F6F4A] text-white'
+                  : 'bg-[#DCEFE3] text-[#1F6F4A]'
+              }`}>
+                {myRequests.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => handleTabChange('mine')}
             className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'mine'
                 ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
@@ -324,18 +403,7 @@ export const CommunityPage = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('requests')}
-            className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
-              activeTab === 'requests'
-                ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
-                : 'text-[#66736B] hover:text-[#17251E]'
-            }`}
-          >
-            My Requests
-          </button>
-
-          <button
-            onClick={() => setActiveTab('saved')}
+            onClick={() => handleTabChange('saved')}
             className={`px-4 py-2 rounded-[10px] text-xs font-semibold whitespace-nowrap transition-all ${
               activeTab === 'saved'
                 ? 'bg-white text-[#1F6F4A] shadow-xs border border-[#E3E9E4]'
@@ -403,8 +471,11 @@ export const CommunityPage = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {feedShares.map((share) => {
-                  const isOwner = user && share.owner?.id === user.id;
+                  const isOwner = share.is_owner || (user && (share.owner?.id === user.id || share.owner === user.id));
                   const isSaved = share.is_saved;
+                  const ownerName = share.owner?.full_name || share.owner_name || 'Neighbor';
+                  const ownerFlat = share.owner?.flat_number || share.owner_flat || 'N/A';
+                  const hasRequested = share.has_active_request || Boolean(share.user_request);
 
                   return (
                     <div 
@@ -416,7 +487,7 @@ export const CommunityPage = () => {
                         {/* Header Badge Row */}
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#DCEFE3] text-[#1F6F4A] border border-[#7FAF8A]/30">
-                            {share.food_item?.category || 'FOOD'}
+                            {share.food_category || share.food_item?.category || 'FOOD'}
                           </span>
 
                           <div className="flex items-center gap-1">
@@ -450,7 +521,7 @@ export const CommunityPage = () => {
                         <div>
                           <h3 className="text-base font-bold text-[#17251E] line-clamp-1">{share.title}</h3>
                           <p className="text-xs text-[#66736B] mt-1 line-clamp-2">
-                            {share.description || share.food_item?.name || 'Surplus food item offered for sharing.'}
+                            {share.description || share.food_name || share.food_item?.name || 'Surplus food item offered for sharing.'}
                           </p>
                         </div>
 
@@ -460,10 +531,10 @@ export const CommunityPage = () => {
                             Available: <span className="text-[#1F6F4A]">{share.quantity} {share.unit}</span>
                           </div>
 
-                          {share.food_item?.expiry_date && (
+                          {(share.expiry_date || share.food_item?.expiry_date) && (
                             <div className="flex items-center gap-1 text-[11px] text-[#D97706] font-medium px-2.5 py-1 rounded-[8px] bg-[#FEF3C7]/60 border border-[#FCD34D]/40">
                               <Clock className="w-3 h-3" />
-                              <span>Expires: {share.food_item.expiry_date}</span>
+                              <span>Expires: {share.expiry_date || share.food_item.expiry_date}</span>
                             </div>
                           )}
                         </div>
@@ -472,9 +543,9 @@ export const CommunityPage = () => {
                         <div className="pt-2 border-t border-[#E3E9E4] flex items-center justify-between text-[11px] text-[#66736B]">
                           <div className="flex items-center gap-1.5">
                             <div className="w-5 h-5 rounded-full bg-[#1F6F4A] text-white flex items-center justify-center font-bold text-[9px]">
-                              {share.owner?.full_name ? share.owner.full_name.charAt(0) : 'U'}
+                              {ownerName.charAt(0).toUpperCase()}
                             </div>
-                            <span>{share.owner?.full_name} (Flat {share.owner?.flat_number || 'N/A'})</span>
+                            <span>{ownerName} (Flat {ownerFlat})</span>
                           </div>
                         </div>
 
@@ -483,18 +554,18 @@ export const CommunityPage = () => {
                       {/* Card Footer Action */}
                       <div className="p-4 bg-[#F8FAF6] border-t border-[#E3E9E4]">
                         {isOwner ? (
-                          <div className="text-center text-xs font-semibold text-[#66736B]">
+                          <div className="w-full py-2.5 text-center text-xs font-semibold text-[#66736B] bg-[#E3E9E4]/40 rounded-[10px] border border-[#E3E9E4]">
                             Your Shared Item
                           </div>
-                        ) : share.has_active_request ? (
-                          <div className="w-full py-2 text-center text-xs font-semibold text-[#1F6F4A] bg-[#DCEFE3] rounded-[10px] border border-[#7FAF8A]/40 flex items-center justify-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>Request Submitted</span>
+                        ) : hasRequested ? (
+                          <div className="w-full py-2.5 text-center text-xs font-bold text-[#1F6F4A] bg-[#DCEFE3] rounded-[10px] border border-[#7FAF8A]/40 flex items-center justify-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-[#1F6F4A]" />
+                            <span>Already Requested ({share.user_request?.status || 'PENDING'})</span>
                           </div>
                         ) : (
                           <button
                             onClick={() => handleOpenRequestModal(share)}
-                            className="w-full py-2.5 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                            className="w-full py-2.5 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
                           >
                             <Send className="w-3.5 h-3.5" />
                             <span>Request Food Share</span>
@@ -505,6 +576,117 @@ export const CommunityPage = () => {
                     </div>
                   );
                 })}
+              </div>
+            )
+          )}
+
+          {/* TAB: INCOMING REQUESTS (OWNER MANAGER) */}
+          {activeTab === 'incoming' && (
+            allIncomingRequests.length === 0 ? (
+              <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-4">
+                <div className="w-12 h-12 rounded-full bg-[#DCEFE3] text-[#1F6F4A] flex items-center justify-center mx-auto">
+                  <Inbox className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-[#17251E]">No Incoming Food Requests</h3>
+                <p className="text-xs text-[#66736B] max-w-sm mx-auto leading-relaxed">
+                  When neighbors in your building request surplus food items you shared, their requests will appear here for your approval.
+                </p>
+
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => navigate('/share-food')}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Share Food Item</span>
+                  </button>
+
+                  {myRequests.length > 0 && (
+                    <button
+                      onClick={() => handleTabChange('requests')}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#DCEFE3] text-[#1F6F4A] text-xs font-bold hover:bg-[#cbe6d4] transition-colors"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span>View My Outgoing Requests ({myRequests.length}) →</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {allIncomingRequests.map((req) => (
+                  <div key={req.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E3E9E4]">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-[#17251E]">{req.share_title}</h3>
+                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                            req.status === 'PENDING' ? 'bg-[#FEF3C7] text-[#D97706]' :
+                            req.status === 'APPROVED' ? 'bg-[#DCEFE3] text-[#1F6F4A]' :
+                            req.status === 'COMPLETED' ? 'bg-[#EBF3FE] text-[#2563EB]' : 'bg-[#FDF2F2] text-[#D9534F]'
+                          }`}>
+                            {req.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#66736B] mt-1">
+                          Requested by: <strong className="text-[#17251E]">{req.requester?.full_name || req.requester_name || 'Neighbor'} (Flat {req.requester?.flat_number || req.requester_flat || 'N/A'})</strong>
+                        </p>
+                      </div>
+
+                      <div className="text-xs font-semibold text-[#1F6F4A] bg-[#F8FAF6] px-3 py-1.5 rounded-[8px] border border-[#E3E9E4]">
+                        Requested Quantity: {req.quantity} {req.share_unit}
+                      </div>
+                    </div>
+
+                    {req.message && (
+                      <p className="text-xs text-[#66736B] bg-[#F8FAF6] p-3 rounded-[10px] border border-[#E3E9E4] italic">
+                        "{req.message}"
+                      </p>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                      <span className="text-[11px] text-[#98A39D]">
+                        Requested on: {new Date(req.created_at).toLocaleDateString()}
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        {req.status === 'PENDING' && (
+                          <>
+                            <button
+                              onClick={() => handleApproveRequest(req.id)}
+                              className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-bold shadow-xs transition-colors"
+                            >
+                              Approve Request
+                            </button>
+                            <button
+                              onClick={() => handleRejectRequest(req.id)}
+                              className="px-4 py-2 rounded-[10px] bg-[#F8FAF6] hover:bg-[#E3E9E4] text-[#66736B] text-xs font-semibold border border-[#E3E9E4]"
+                            >
+                              Decline
+                            </button>
+                          </>
+                        )}
+
+                        {req.status === 'APPROVED' && (
+                          <button
+                            onClick={() => handleCompleteHandover(req.id)}
+                            className="px-4 py-2 rounded-[10px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold shadow-xs flex items-center gap-1.5"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Complete Handover & Add to Neighbor's Pantry 🎁</span>
+                          </button>
+                        )}
+
+                        {req.status === 'COMPLETED' && (
+                          <span className="text-xs font-bold text-[#2563EB] bg-[#EBF3FE] px-3 py-1.5 rounded-full border border-[#2563EB]/20 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Handover Completed & Added to Pantry</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )
           )}
@@ -566,7 +748,7 @@ export const CommunityPage = () => {
                             <div key={req.id} className="p-3 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                               <div className="space-y-0.5">
                                 <div className="text-xs font-bold text-[#17251E]">
-                                  {req.requester?.full_name} (Flat {req.requester?.flat_number})
+                                  {req.requester?.full_name || req.requester_name || 'Neighbor'} (Flat {req.requester?.flat_number || req.requester_flat || 'N/A'})
                                 </div>
                                 <div className="text-[11px] text-[#66736B]">
                                   Requested: <span className="font-semibold text-[#1F6F4A]">{req.quantity} {share.unit}</span>
@@ -619,7 +801,7 @@ export const CommunityPage = () => {
             )
           )}
 
-          {/* TAB 3: MY REQUESTS */}
+          {/* TAB 3: MY OUTGOING REQUESTS */}
           {activeTab === 'requests' && (
             myRequests.length === 0 ? (
               <div className="bg-white rounded-[16px] p-12 text-center border border-[#E3E9E4] space-y-3">
@@ -629,31 +811,75 @@ export const CommunityPage = () => {
             ) : (
               <div className="space-y-3">
                 {myRequests.map((req) => (
-                  <div key={req.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-[#17251E]">{req.share?.title}</h3>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          req.status === 'APPROVED' ? 'bg-[#DCEFE3] text-[#1F6F4A]' :
-                          req.status === 'COMPLETED' ? 'bg-[#EBF3FE] text-[#2563EB]' :
-                          req.status === 'PENDING' ? 'bg-[#FEF3C7] text-[#D97706]' : 'bg-[#FDF2F2] text-[#D9534F]'
-                        }`}>
-                          {req.status}
-                        </span>
+                  <div key={req.id} className="bg-white rounded-[16px] p-5 border border-[#E3E9E4] shadow-xs space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E3E9E4]">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-[#17251E]">{req.share_title || req.share?.title}</h3>
+                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                            req.status === 'APPROVED' ? 'bg-[#DCEFE3] text-[#1F6F4A]' :
+                            req.status === 'COMPLETED' ? 'bg-[#EBF3FE] text-[#2563EB]' :
+                            req.status === 'PENDING' ? 'bg-[#FEF3C7] text-[#D97706]' : 'bg-[#FDF2F2] text-[#D9534F]'
+                          }`}>
+                            {req.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#66736B] mt-1">
+                          Owner: <strong className="text-[#17251E]">{req.share_owner_name || req.share?.owner?.full_name || 'Neighbor'} (Flat {req.share_owner_flat || req.share?.owner?.flat_number || 'N/A'})</strong>
+                        </p>
                       </div>
-                      <p className="text-xs text-[#66736B]">
-                        Requested Quantity: <strong>{req.quantity} {req.share?.unit}</strong> from {req.share?.owner?.full_name} (Flat {req.share?.owner?.flat_number})
-                      </p>
+
+                      <div className="text-xs font-semibold text-[#1F6F4A] bg-[#F8FAF6] px-3 py-1.5 rounded-[8px] border border-[#E3E9E4]">
+                        Requested Quantity: {req.quantity} {req.share_unit || req.share?.unit}
+                      </div>
                     </div>
 
-                    {req.status === 'APPROVED' && (
-                      <button
-                        onClick={() => handleCompleteHandover(req.id)}
-                        className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] text-white text-xs font-semibold"
-                      >
-                        Confirm Received
-                      </button>
-                    )}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                      {req.status === 'PENDING' && (
+                        <p className="text-xs text-[#D97706] font-medium flex items-center gap-1.5">
+                          <Clock className="w-4 h-4" />
+                          <span>Waiting for owner to review and approve your request...</span>
+                        </p>
+                      )}
+
+                      {req.status === 'APPROVED' && (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full gap-3">
+                          <p className="text-xs text-[#1F6F4A] font-semibold flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Approved by owner! Contact owner for pickup.</span>
+                          </p>
+                          <button
+                            onClick={() => handleCompleteHandover(req.id)}
+                            className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-bold shadow-xs shrink-0"
+                          >
+                            Confirm Received & Add to Pantry
+                          </button>
+                        </div>
+                      )}
+
+                      {req.status === 'REJECTED' && (
+                        <p className="text-xs text-[#D9534F] font-medium flex items-center gap-1.5">
+                          <XCircle className="w-4 h-4" />
+                          <span>Your request was declined by the owner.</span>
+                        </p>
+                      )}
+
+                      {req.status === 'COMPLETED' && (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full gap-3">
+                          <p className="text-xs text-[#2563EB] font-semibold flex items-center gap-1.5">
+                            <Package className="w-4 h-4 text-[#2563EB]" />
+                            <span>Handover Complete! Claimed item is in your Smart Pantry 🎁</span>
+                          </p>
+                          <button
+                            onClick={() => navigate('/add-food')}
+                            className="px-4 py-2 rounded-[10px] bg-[#EBF3FE] hover:bg-[#DBEAFE] text-[#2563EB] text-xs font-bold border border-[#2563EB]/20 shrink-0 flex items-center gap-1"
+                          >
+                            <span>View in Smart Pantry</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -711,6 +937,13 @@ export const CommunityPage = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {requestModalError && (
+              <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{requestModalError}</span>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="p-3 rounded-[10px] bg-[#F8FAF6] border border-[#E3E9E4] text-xs space-y-1">
