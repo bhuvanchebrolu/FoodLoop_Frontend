@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+
 import useAuth from '../hooks/useAuth';
 import authService from '../services/authService';
 import activityService from '../services/activityService';
+import { checkPushSupport, requestNotificationPermission } from '../firebase/messaging';
+import deviceService from '../services/deviceService';
 import { 
   User, 
   Building2, 
@@ -22,7 +25,12 @@ import {
   Trash2,
   Utensils,
   PlusCircle,
-  Calendar
+  Calendar,
+  Smartphone,
+  BellRing,
+  Send,
+  Radio,
+  XCircle
 } from 'lucide-react';
 
 export const ProfilePage = () => {
@@ -61,6 +69,88 @@ export const ProfilePage = () => {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState('');
   const [settingsError, setSettingsError] = useState('');
+
+  // FCM Push Notification state
+  const [pushSupportState, setPushSupportState] = useState({ supported: true, permission: 'default' });
+  const [userDevices, setUserDevices] = useState([]);
+  const [enablingPush, setEnablingPush] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
+  const [pushSuccess, setPushSuccess] = useState('');
+  const [pushError, setPushError] = useState('');
+
+  const loadPushState = useCallback(async () => {
+    try {
+      const state = await checkPushSupport();
+      setPushSupportState(state);
+      if (state.supported) {
+        const devData = await deviceService.getDevices();
+        setUserDevices(devData.results || devData || []);
+      }
+    } catch (err) {
+      console.error('Failed to load FCM push state:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      loadPushState();
+    }
+  }, [activeTab, loadPushState]);
+
+  const handleEnablePush = async () => {
+    setEnablingPush(true);
+    setPushSuccess('');
+    setPushError('');
+    try {
+      const res = await requestNotificationPermission();
+      if (res.success) {
+        setPushSuccess('Browser Push Notifications enabled and registered with Django backend!');
+        loadPushState();
+      } else {
+        if (res.reason === 'DENIED') {
+          setPushError('Notification permission was blocked in browser settings. Please enable notifications for localhost in your browser address bar.');
+        } else if (res.reason === 'MISSING_VAPID') {
+          setPushError('VITE_FIREBASE_VAPID_KEY is missing from frontend .env file.');
+        } else if (res.reason === 'UNCONFIGURED') {
+          setPushError('Firebase environment variables (VITE_FIREBASE_*) are not configured in frontend .env file.');
+        } else {
+          setPushError('Failed to enable browser push notifications.');
+        }
+      }
+    } catch (err) {
+      setPushError('An error occurred while enabling push notifications.');
+    } finally {
+      setEnablingPush(false);
+    }
+  };
+
+  const handleDisablePush = async (deviceId) => {
+    try {
+      await deviceService.unregisterDevice(deviceId);
+      setPushSuccess('Device token deactivated.');
+      loadPushState();
+    } catch (err) {
+      setPushError('Failed to deactivate device token.');
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    setTestingPush(true);
+    setPushSuccess('');
+    setPushError('');
+    try {
+      const res = await deviceService.sendDevTestPush('FoodLoop Push Test 🔔', 'Your browser push notifications are connected and working!');
+      if (res.success) {
+        setPushSuccess(res.message);
+      } else {
+        setPushError(res.message);
+      }
+    } catch (err) {
+      setPushError(err.response?.data?.message || 'Failed to send test push notification.');
+    } finally {
+      setTestingPush(false);
+    }
+  };
 
   // Load profile summary stats from backend
   useEffect(() => {
@@ -738,6 +828,104 @@ export const ProfilePage = () => {
                     />
                   </label>
 
+                </div>
+              </div>
+
+              {/* Browser Push Notifications (FCM Integration) */}
+              <div className="space-y-4 pt-4 border-t border-[#E3E9E4]">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[#98A39D] uppercase tracking-wider flex items-center gap-2">
+                    <Radio className="w-3.5 h-3.5 text-[#1F6F4A]" />
+                    <span>Browser Push Notifications (FCM)</span>
+                  </h3>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    userDevices.length > 0
+                      ? 'bg-[#DCEFE3] text-[#1F6F4A] border-[#7FAF8A]/40'
+                      : pushSupportState.permission === 'denied'
+                      ? 'bg-[#FDF2F2] text-[#D9534F] border-[#F8B4B4]/40'
+                      : 'bg-[#F8FAF6] text-[#66736B] border-[#E3E9E4]'
+                  }`}>
+                    {userDevices.length > 0 ? 'Enabled' : pushSupportState.permission === 'denied' ? 'Blocked' : 'Not Enabled'}
+                  </span>
+                </div>
+
+                {pushSuccess && (
+                  <div className="p-3 rounded-[10px] bg-[#DCEFE3] border border-[#7FAF8A]/40 text-[#1F6F4A] text-xs font-medium flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{pushSuccess}</span>
+                  </div>
+                )}
+
+                {pushError && (
+                  <div className="p-3 rounded-[10px] bg-[#FDF2F2] border border-[#F8B4B4]/40 text-[#D9534F] text-xs font-medium flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{pushError}</span>
+                  </div>
+                )}
+
+                <div className="p-4 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-[#17251E] flex items-center gap-1.5">
+                        <Smartphone className="w-4 h-4 text-[#1F6F4A]" />
+                        <span>Background Web Push Delivery</span>
+                      </h4>
+                      <p className="text-[11px] text-[#66736B] mt-0.5 max-w-lg">
+                        Receive real-time FoodLoop alerts (food expiry warnings, food share requests) even when the browser tab is in the background.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {userDevices.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={testingPush}
+                          onClick={handleSendTestPush}
+                          className="px-3.5 py-2 rounded-[10px] bg-[#EBF3FE] hover:bg-[#DBEAFE] text-[#2563EB] text-xs font-bold border border-[#2563EB]/20 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        >
+                          {testingPush ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                          <span>Send Test Push 🔔</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={enablingPush || pushSupportState.permission === 'denied'}
+                        onClick={handleEnablePush}
+                        className="px-4 py-2 rounded-[10px] bg-[#1F6F4A] hover:bg-[#174F37] text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                      >
+                        {enablingPush ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BellRing className="w-3.5 h-3.5" />}
+                        <span>{userDevices.length > 0 ? 'Re-register Device' : 'Enable Notifications'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Registered Devices List */}
+                  {userDevices.length > 0 && (
+                    <div className="pt-3 border-t border-[#E3E9E4] space-y-2">
+                      <span className="text-[11px] font-bold text-[#98A39D] uppercase tracking-wider block">
+                        Registered Browser Devices ({userDevices.length})
+                      </span>
+                      <div className="space-y-1.5">
+                        {userDevices.map((dev) => (
+                          <div key={dev.id} className="p-2.5 rounded-[8px] bg-white border border-[#E3E9E4] flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <Smartphone className="w-3.5 h-3.5 text-[#1F6F4A]" />
+                              <span className="font-semibold text-[#17251E]">{dev.device_name}</span>
+                              <span className="text-[10px] text-[#98A39D]">• Registered {new Date(dev.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDisablePush(dev.id)}
+                              className="px-2.5 py-1 rounded bg-[#FDF2F2] text-[#D9534F] hover:bg-[#FEE2E2] text-[11px] font-semibold border border-[#F8B4B4]/40 transition-colors"
+                            >
+                              Disable Device
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

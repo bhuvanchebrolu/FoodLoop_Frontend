@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import notificationService from '../services/notificationService';
+import { setupForegroundListener } from '../firebase/messaging';
 import { 
   Home, 
   Package, 
@@ -20,7 +21,8 @@ import {
   Clock,
   AlertTriangle,
   Shield,
-  TrendingUp
+  TrendingUp,
+  BellRing
 } from 'lucide-react';
 
 const MainLayout = () => {
@@ -33,6 +35,7 @@ const MainLayout = () => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifLoading, setNotifLoading] = useState(false);
+  const [foregroundToast, setForegroundToast] = useState(null);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -48,6 +51,22 @@ const MainLayout = () => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000); // 30s polling
     return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  // FCM Foreground Notification listener
+  useEffect(() => {
+    let unsubscribe = null;
+    setupForegroundListener((payload) => {
+      fetchNotifications();
+      setForegroundToast(payload);
+      setTimeout(() => setForegroundToast(null), 6000);
+    }).then((unsub) => {
+      unsubscribe = unsub;
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [fetchNotifications]);
 
   const handleMarkRead = async (id) => {
@@ -324,6 +343,46 @@ const MainLayout = () => {
       {/* MAIN VIEWPORT CONTENT */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full min-h-[calc(100vh-60px)] md:min-h-screen flex flex-col justify-between">
         <div>
+          {/* Foreground FCM Web Push Toast Banner */}
+          {foregroundToast && (
+            <div className="mb-6 p-4 rounded-[14px] bg-gradient-to-r from-[#174F37] to-[#1F6F4A] text-white shadow-lg border border-[#7FAF8A]/40 flex items-center justify-between gap-4 animate-bounce-short">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                  <BellRing className="w-5 h-5 text-[#DCEFE3]" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                    <span>{foregroundToast.title}</span>
+                    <span className="bg-[#DCEFE3] text-[#1F6F4A] text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase">Real-Time Push</span>
+                  </h4>
+                  <p className="text-xs text-[#DCEFE3] mt-0.5">{foregroundToast.body}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    setForegroundToast(null);
+                    if (foregroundToast.data?.type?.startsWith('SHARE_')) {
+                      navigate('/community?tab=requests');
+                    } else {
+                      navigate('/alerts');
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-[8px] bg-white text-[#1F6F4A] text-xs font-bold hover:bg-[#DCEFE3] transition-colors"
+                >
+                  View Alert
+                </button>
+                <button
+                  onClick={() => setForegroundToast(null)}
+                  className="p-1 rounded text-white/70 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           <Outlet />
         </div>
 
