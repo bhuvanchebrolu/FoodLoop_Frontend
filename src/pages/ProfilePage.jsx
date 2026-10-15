@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import useAuth from '../hooks/useAuth';
 import authService from '../services/authService';
 import activityService from '../services/activityService';
+import analyticsService from '../services/analyticsService';
 import { checkPushSupport, requestNotificationPermission } from '../firebase/messaging';
 import deviceService from '../services/deviceService';
 import { 
@@ -30,13 +31,23 @@ import {
   BellRing,
   Send,
   Radio,
-  XCircle
+  XCircle,
+  Award,
+  Trophy,
+  Crown,
+  Medal,
+  Sparkles
 } from 'lucide-react';
 
 export const ProfilePage = () => {
   const { user, userSettings, updateProfile, fetchSettings, updateSettings } = useAuth();
 
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'impact' | 'activity' | 'settings'
+
+  // Recognition & Leaderboard states
+  const [badgeData, setBadgeData] = useState(null);
+  const [leaderboardData, setLeaderboardData] = useState([]);
+  const [recognitionLoading, setRecognitionLoading] = useState(false);
 
   // Consolidated Database Stats & Impact
   const [profileSummary, setProfileSummary] = useState(null);
@@ -151,6 +162,32 @@ export const ProfilePage = () => {
       setTestingPush(false);
     }
   };
+
+  // Load recognition badges and leaderboard when switching to impact tab
+  useEffect(() => {
+    let isMounted = true;
+    if (activeTab === 'impact') {
+      const loadRecognition = async () => {
+        try {
+          setRecognitionLoading(true);
+          const [bData, lData] = await Promise.all([
+            analyticsService.getBadges(),
+            analyticsService.getLeaderboard()
+          ]);
+          if (isMounted) {
+            setBadgeData(bData);
+            setLeaderboardData(lData?.leaderboard || []);
+          }
+        } catch (err) {
+          console.error('Failed to load badges or leaderboard:', err);
+        } finally {
+          if (isMounted) setRecognitionLoading(false);
+        }
+      };
+      loadRecognition();
+    }
+    return () => { isMounted = false; };
+  }, [activeTab]);
 
   // Load profile summary stats from backend
   useEffect(() => {
@@ -633,6 +670,202 @@ export const ProfilePage = () => {
                     <div className="text-xl font-bold text-[#17251E]">{stats.requests_made || 0}</div>
                   </div>
                 </div>
+              </div>
+
+              {/* Eco-Recognition & Percentile Rank Card */}
+              <div className="bg-white rounded-[16px] p-6 sm:p-8 border border-[#E3E9E4] shadow-xs space-y-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-4 border-b border-[#E3E9E4]">
+                  <div>
+                    <h2 className="text-lg font-bold text-[#17251E] flex items-center gap-2">
+                      <Award className="w-5 h-5 text-[#1F6F4A]" />
+                      <span>Eco-Recognition & Percentile Rank</span>
+                    </h2>
+                    <p className="text-xs text-[#66736B]">
+                      Powered by PostgreSQL Materialized View <code className="bg-[#F8FAF6] px-1 py-0.5 rounded text-[11px] font-mono">mview_user_eco_badges</code>
+                    </p>
+                  </div>
+                  {badgeData && (
+                    <span className="text-xs font-bold text-[#1F6F4A] bg-[#DCEFE3] border border-[#7FAF8A]/40 px-3 py-1 rounded-full flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{badgeData.badge || 'Eco Starter 🌱'}</span>
+                    </span>
+                  )}
+                </div>
+
+                {recognitionLoading ? (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2 text-[#1F6F4A]">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="text-xs font-medium">Calculating percentile ranking...</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+                    {/* Badge Trophy Box */}
+                    <div className="rounded-[16px] p-6 bg-gradient-to-br from-[#174F37] via-[#1F6F4A] to-[#2E8B57] text-white shadow-md flex flex-col justify-between space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#A3E6B7]">Current Status</span>
+                        <Crown className="w-6 h-6 text-[#FCD34D]" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-2xl font-extrabold tracking-tight">
+                          {badgeData?.badge || 'Eco Starter 🌱'}
+                        </div>
+                        <div className="text-xs text-[#DCEFE3] font-medium">
+                          Quartile #{badgeData?.quartile || 1} • {badgeData?.percentile_rank_percent >= 75 ? 'Top Tier Contributor' : 'Active Contributor'}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-[#A3E6B7] leading-relaxed pt-2 border-t border-white/15">
+                        Awarded based on community food sharing volume and verified waste diversion.
+                      </p>
+                    </div>
+
+                    {/* Percentile Standing & Ranks */}
+                    <div className="md:col-span-2 rounded-[16px] p-6 bg-[#F8FAF6] border border-[#E3E9E4] flex flex-col justify-between space-y-5">
+                      {/* Percentile Progress Meter */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-[#17251E] flex items-center gap-1.5">
+                            <TrendingUp className="w-4 h-4 text-[#1F6F4A]" />
+                            <span>Community Percentile Standing</span>
+                          </span>
+                          <span className="font-extrabold text-[#1F6F4A]">
+                            Top {Math.max(1, (100 - (badgeData?.percentile_rank_percent || 0))).toFixed(0)}% ({badgeData?.percentile_rank_percent || 0}th percentile)
+                          </span>
+                        </div>
+                        <div className="w-full h-3.5 bg-[#E3E9E4] rounded-full overflow-hidden p-0.5">
+                          <div
+                            className="h-full bg-gradient-to-r from-[#1F6F4A] to-[#10B981] rounded-full transition-all duration-700 shadow-xs"
+                            style={{ width: `${Math.max(12, badgeData?.percentile_rank_percent || 0)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[10px] text-[#66736B]">
+                          <span>0% (Eco Starter)</span>
+                          <span>50% (Veteran)</span>
+                          <span>75% (Champion)</span>
+                          <span>90%+ (Master)</span>
+                        </div>
+                      </div>
+
+                      {/* Rank Metric Chips */}
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[#E3E9E4]">
+                        <div className="p-3.5 rounded-[12px] bg-white border border-[#E3E9E4] space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-[#66736B] font-semibold">
+                            <Trophy className="w-3.5 h-3.5 text-[#D97706]" />
+                            <span>Global Standing</span>
+                          </div>
+                          <div className="text-xl font-bold text-[#17251E]">
+                            #{leaderboardData.find(l => l.user_id === user?.id)?.global_rank || 1} <span className="text-xs font-normal text-[#66736B]">Rank</span>
+                          </div>
+                          <div className="text-[10px] text-[#1F6F4A] font-medium">Across all communities</div>
+                        </div>
+
+                        <div className="p-3.5 rounded-[12px] bg-white border border-[#E3E9E4] space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-[#66736B] font-semibold">
+                            <Building2 className="w-3.5 h-3.5 text-[#2563EB]" />
+                            <span>Apartment Rank</span>
+                          </div>
+                          <div className="text-xl font-bold text-[#17251E]">
+                            #{leaderboardData.find(l => l.user_id === user?.id)?.apartment_rank || 1} <span className="text-xs font-normal text-[#66736B]">Rank</span>
+                          </div>
+                          <div className="text-[10px] text-[#2563EB] font-medium">{user?.display_apartment_name || 'My Apartment'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Community Food Savers Leaderboard Section */}
+              <div className="bg-white rounded-[16px] p-6 sm:p-8 border border-[#E3E9E4] shadow-xs space-y-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-4 border-b border-[#E3E9E4]">
+                  <div>
+                    <h2 className="text-lg font-bold text-[#17251E] flex items-center gap-2">
+                      <Trophy className="w-5 h-5 text-[#D97706]" />
+                      <span>Community Food Savers Leaderboard</span>
+                    </h2>
+                    <p className="text-xs text-[#66736B]">
+                      Resident standings ordered by total food shared (kg) via database view <code className="bg-[#F8FAF6] px-1 py-0.5 rounded text-[11px] font-mono">v_user_community_leaderboard</code>
+                    </p>
+                  </div>
+                  <div className="text-xs font-semibold text-[#66736B]">
+                    Top Contributors
+                  </div>
+                </div>
+
+                {recognitionLoading ? (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2 text-[#1F6F4A]">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="text-xs font-medium">Loading community leaderboard...</span>
+                  </div>
+                ) : leaderboardData.length === 0 ? (
+                  <div className="py-8 text-center text-[#66736B] text-xs">
+                    No leaderboard activity recorded yet. Start sharing food to appear on the board!
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#E3E9E4] text-[11px] font-bold text-[#66736B] uppercase tracking-wider bg-[#F8FAF6]">
+                          <th className="py-3 px-4">Rank</th>
+                          <th className="py-3 px-4">Resident</th>
+                          <th className="py-3 px-4">Total Shared</th>
+                          <th className="py-3 px-4">Completed Shares</th>
+                          <th className="py-3 px-4 text-right">Recognition Tier</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E3E9E4] text-xs">
+                        {leaderboardData.map((row) => {
+                          const isCurrentUser = row.user_id === user?.id;
+                          return (
+                            <tr
+                              key={row.user_id}
+                              className={`transition-colors ${
+                                isCurrentUser
+                                  ? 'bg-[#DCEFE3]/50 font-semibold'
+                                  : 'hover:bg-[#F8FAF6]/60'
+                              }`}
+                            >
+                              <td className="py-3.5 px-4 font-bold">
+                                {row.global_rank === 1 && <span className="text-base mr-1">🥇</span>}
+                                {row.global_rank === 2 && <span className="text-base mr-1">🥈</span>}
+                                {row.global_rank === 3 && <span className="text-base mr-1">🥉</span>}
+                                <span className={row.global_rank <= 3 ? 'text-[#1F6F4A]' : 'text-[#66736B]'}>
+                                  #{row.global_rank}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-[#17251E]">
+                                <div className="flex items-center gap-2">
+                                  <span>{row.full_name}</span>
+                                  {isCurrentUser && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#1F6F4A] text-white">
+                                      You
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4 font-bold text-[#1F6F4A]">
+                                {row.total_shared_kg} kg
+                              </td>
+                              <td className="py-3.5 px-4 text-[#66736B]">
+                                {row.completed_shares_count} shares
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                                  row.global_rank === 1
+                                    ? 'bg-[#FEF3C7] text-[#D97706] border-[#FCD34D]'
+                                    : row.global_rank <= 3
+                                    ? 'bg-[#DCEFE3] text-[#1F6F4A] border-[#7FAF8A]/40'
+                                    : 'bg-[#F8FAF6] text-[#66736B] border-[#E3E9E4]'
+                                }`}>
+                                  {row.global_rank === 1 ? 'Zero-Waste Master 👑' : row.global_rank <= 3 ? 'Community Champion 🏆' : 'Food Saver Veteran ⭐'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </>
           )}

@@ -24,6 +24,16 @@ export const analyticsService = {
   getImpactData: async (period = '30d') => {
     const response = await api.get(`/analytics/impact/?period=${period}`);
     return response.data;
+  },
+
+  getBadges: async () => {
+    const response = await api.get('/analytics/badges/');
+    return response.data;
+  },
+
+  getLeaderboard: async () => {
+    const response = await api.get('/analytics/leaderboard/');
+    return response.data;
   }
 };
 
