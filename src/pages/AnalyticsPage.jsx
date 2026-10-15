@@ -21,7 +21,11 @@ import {
   Crown,
   Medal,
   Sparkles,
-  Building2
+  Building2,
+  TrendingDown,
+  Activity,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 
 const PERIOD_OPTIONS = [
