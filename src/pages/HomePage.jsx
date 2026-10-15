@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import foodService from '../services/foodService';
 import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import useFoods from '../hooks/useFoods';
@@ -109,6 +110,33 @@ export const HomePage = () => {
     updateFoodItem,
     deleteFoodItem
   } = useFoods();
+
+  // PostgreSQL pg_trgm Fuzzy Search Suggestions
+  const [fuzzySuggestions, setFuzzySuggestions] = useState([]);
+  const [showFuzzyDropdown, setShowFuzzyDropdown] = useState(false);
+  const [fuzzyLoading, setFuzzyLoading] = useState(false);
+
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (trimmed.length >= 2) {
+      const handler = setTimeout(async () => {
+        try {
+          setFuzzyLoading(true);
+          const data = await foodService.fuzzySearchFoods(trimmed);
+          setFuzzySuggestions(data.results || []);
+          setShowFuzzyDropdown(true);
+        } catch (err) {
+          console.error('Fuzzy search error:', err);
+        } finally {
+          setFuzzyLoading(false);
+        }
+      }, 300);
+      return () => clearTimeout(handler);
+    } else {
+      setFuzzySuggestions([]);
+      setShowFuzzyDropdown(false);
+    }
+  }, [search]);
 
   // Edit Modal State
   const [editingItem, setEditingItem] = useState(null);
@@ -536,16 +564,80 @@ export const HomePage = () => {
           {/* Search, Filter & Sort Inputs Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-2">
             
-            {/* Search Input (4 cols) */}
+            {/* Search Input (4 cols) with pg_trgm Typo-Tolerant Suggestions */}
             <div className="lg:col-span-4 relative">
               <Search className="w-4 h-4 text-[#98A39D] absolute left-3.5 top-3" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Search food by name..."
-                className="w-full pl-9 pr-3.5 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
+                onFocus={() => { if (fuzzySuggestions.length > 0) setShowFuzzyDropdown(true); }}
+                placeholder="Search food by name (typo-tolerant)..."
+                className="w-full pl-9 pr-8 py-2.5 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6] text-xs text-[#17251E] focus:outline-none focus:border-[#1F6F4A] focus:bg-white transition-colors"
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => { setSearch(''); setShowFuzzyDropdown(false); }}
+                  className="absolute right-2.5 top-2.5 text-[#98A39D] hover:text-[#17251E] p-0.5"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              {/* PostgreSQL pg_trgm Trigram Matches Popover */}
+              {showFuzzyDropdown && search.trim().length >= 2 && (
+                <div 
+                  className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white rounded-[12px] border border-[#E3E9E4] shadow-lg p-2 space-y-1 max-h-60 overflow-y-auto"
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  <div className="flex items-center justify-between px-2 py-1 text-[10px] font-bold text-[#66736B] uppercase tracking-wider border-b border-[#E3E9E4]">
+                    <span className="flex items-center gap-1.5 text-[#1F6F4A]">
+                      <Sparkles className="w-3 h-3 text-[#1F6F4A]" />
+                      <span>PostgreSQL pg_trgm Trigram Matches</span>
+                    </span>
+                    <button 
+                      type="button" 
+                      onClick={() => setShowFuzzyDropdown(false)} 
+                      className="text-[#98A39D] hover:text-[#17251E]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {fuzzyLoading ? (
+                    <div className="p-3 text-center text-xs text-[#66736B] flex items-center justify-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1F6F4A]" />
+                      <span>Matching trigrams...</span>
+                    </div>
+                  ) : fuzzySuggestions.length === 0 ? (
+                    <div className="p-3 text-center text-xs text-[#66736B]">
+                      No trigram matches for "{search}".
+                    </div>
+                  ) : (
+                    fuzzySuggestions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setSearch(item.name);
+                          setShowFuzzyDropdown(false);
+                        }}
+                        className="w-full text-left p-2 rounded-[8px] hover:bg-[#F8FAF6] transition-colors flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[#17251E] truncate">{item.name}</div>
+                          <div className="text-[10px] text-[#66736B]">{item.category} • {item.quantity} {item.unit}</div>
+                        </div>
+                        <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DCEFE3] text-[#1F6F4A] border border-[#7FAF8A]/40">
+                          {Math.round((item.match_score || 0) * 100)}% Match
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Category Filter (2 cols) */}

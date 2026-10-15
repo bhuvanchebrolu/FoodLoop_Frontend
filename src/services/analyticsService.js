@@ -34,6 +34,11 @@ export const analyticsService = {
   getLeaderboard: async () => {
     const response = await api.get('/analytics/leaderboard/');
     return response.data;
+  },
+
+  getTrends: async () => {
+    const response = await api.get('/analytics/trends/');
+    return response.data;
   }
 };
 

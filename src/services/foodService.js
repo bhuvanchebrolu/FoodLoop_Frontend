@@ -11,6 +11,11 @@ export const foodService = {
     return response.data;
   },
 
+  async fuzzySearchFoods(query) {
+    const response = await api.get('/foods/fuzzy-search/', { params: { q: query } });
+    return response.data;
+  },
+
   async getFoodById(id) {
     const response = await api.get(`/foods/${id}/`);
     return response.data;

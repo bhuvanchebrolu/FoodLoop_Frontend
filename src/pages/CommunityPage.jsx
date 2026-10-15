@@ -27,7 +27,8 @@ import {
   UserCheck,
   Flag,
   Inbox,
-  ArrowRight
+  ArrowRight,
+  MapPin
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -55,6 +56,7 @@ export const CommunityPage = () => {
   const [activeTab, setActiveTab] = useState(initialTab); // 'feed' | 'incoming' | 'requests' | 'mine' | 'saved'
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('ALL');
+  const [radiusFilter, setRadiusFilter] = useState('ALL');
 
   // Data states
   const [feedShares, setFeedShares] = useState([]);
@@ -101,7 +103,11 @@ export const CommunityPage = () => {
       setLoading(true);
 
       if (activeTab === 'feed') {
-        const data = await shareService.getCommunityShares({ search, category });
+        const params = { search, category };
+        if (radiusFilter && radiusFilter !== 'ALL') {
+          params.radius = radiusFilter;
+        }
+        const data = await shareService.getCommunityShares(params);
         setFeedShares(data.results || data || []);
       } else if (activeTab === 'mine') {
         const data = await shareService.getMyShares();
@@ -123,7 +129,7 @@ export const CommunityPage = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeTab, search, category]);
+  }, [activeTab, search, category, radiusFilter]);
 
   useEffect(() => {
     loadData();
@@ -437,6 +443,23 @@ export const CommunityPage = () => {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+
+            {/* Spatial Haversine Radius Filter */}
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-[10px] border border-[#E3E9E4] bg-[#F8FAF6]">
+              <MapPin className="w-3.5 h-3.5 text-[#1F6F4A]" />
+              <select
+                value={radiusFilter}
+                onChange={(e) => setRadiusFilter(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-[#17251E] focus:outline-none cursor-pointer"
+                title="PostgreSQL Haversine Spatial Radius Search"
+              >
+                <option value="ALL">🏢 Building Feed (All)</option>
+                <option value="5">📍 Within 5 km</option>
+                <option value="10">📍 Within 10 km</option>
+                <option value="25">📍 Within 25 km</option>
+                <option value="50">📍 Within 50 km</option>
+              </select>
+            </div>
           </div>
         )}
       </div>
@@ -546,6 +569,19 @@ export const CommunityPage = () => {
                               {ownerName.charAt(0).toUpperCase()}
                             </div>
                             <span>{ownerName} (Flat {ownerFlat})</span>
+                          </div>
+
+                          {/* PostgreSQL Haversine Spatial Distance Badge */}
+                          <div 
+                            className="flex items-center gap-1 font-semibold text-[#1F6F4A] bg-[#DCEFE3]/80 px-2 py-0.5 rounded-full text-[10px] border border-[#7FAF8A]/40"
+                            title="Calculated via PostgreSQL Haversine Distance Formula"
+                          >
+                            <MapPin className="w-3 h-3 text-[#1F6F4A]" />
+                            <span>
+                              {share.distance_km !== null && share.distance_km !== undefined
+                                ? (share.distance_km === 0 ? 'Same Complex' : `${share.distance_km} km away`)
+                                : 'Same Complex'}
+                            </span>
                           </div>
                         </div>
 
