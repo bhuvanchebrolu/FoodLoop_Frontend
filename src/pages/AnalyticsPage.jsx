@@ -43,6 +43,7 @@ export const AnalyticsPage = () => {
   const [sharingData, setSharingData] = useState(null);
   const [badgeData, setBadgeData] = useState(null);
   const [leaderboardData, setLeaderboardData] = useState([]);
+  const [trendsData, setTrendsData] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,13 +53,14 @@ export const AnalyticsPage = () => {
       setLoading(true);
       setError('');
       
-      const [ov, cs, ws, sh, bData, lData] = await Promise.all([
+      const [ov, cs, ws, sh, bData, lData, tData] = await Promise.all([
         analyticsService.getOverview(period),
         analyticsService.getConsumptionData(period),
         analyticsService.getWasteData(period),
         analyticsService.getSharingData(period),
         analyticsService.getBadges(),
-        analyticsService.getLeaderboard()
+        analyticsService.getLeaderboard(),
+        analyticsService.getTrends()
       ]);
 
       setOverviewData(ov);
@@ -67,6 +69,7 @@ export const AnalyticsPage = () => {
       setSharingData(sh);
       setBadgeData(bData);
       setLeaderboardData(lData?.leaderboard || []);
+      setTrendsData(tData?.trends || []);
     } catch (err) {
       console.error('Failed to load analytics:', err);
       setError('Unable to fetch analytics metrics for the selected time range.');
@@ -315,6 +318,162 @@ export const AnalyticsPage = () => {
               )}
             </div>
 
+          </div>
+
+          {/* Daily Consumption Trends & Window Functions (AVG OVER, LAG, CUMULATIVE SUM) */}
+          <div className="bg-white rounded-[16px] p-6 sm:p-8 border border-[#E3E9E4] shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-4 border-b border-[#E3E9E4]">
+              <div>
+                <h2 className="text-lg font-bold text-[#17251E] flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-[#1F6F4A]" />
+                  <span>Consumption Trends & Moving Averages</span>
+                </h2>
+                <p className="text-xs text-[#66736B]">
+                  Calculated with PostgreSQL Window Functions: <code className="bg-[#F8FAF6] px-1.5 py-0.5 rounded text-[11px] font-mono text-[#1F6F4A]">AVG() OVER (ROWS 6 PRECEDING)</code> & <code className="bg-[#F8FAF6] px-1.5 py-0.5 rounded text-[11px] font-mono text-[#1F6F4A]">LAG() OVER</code>
+                </p>
+              </div>
+              <span className="text-xs font-bold text-[#1F6F4A] bg-[#DCEFE3] border border-[#7FAF8A]/40 px-3 py-1 rounded-full flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>Rolling 7-Day Window</span>
+              </span>
+            </div>
+
+            {trendsData.length === 0 ? (
+              <div className="p-8 text-center space-y-2 bg-[#F8FAF6] rounded-[12px] border border-[#E3E9E4]">
+                <Activity className="w-8 h-8 text-[#98A39D] mx-auto" />
+                <h4 className="text-sm font-bold text-[#17251E]">No Consumption History Logged Yet</h4>
+                <p className="text-xs text-[#66736B] max-w-md mx-auto">
+                  When you mark food items in your pantry as consumed, PostgreSQL calculates your rolling 7-day moving consumption average and day-over-day changes using SQL window functions.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* 3 Metric Summary Cards */}
+                {(() => {
+                  const latest = trendsData[trendsData.length - 1];
+                  const prevDayDiff = latest.prev_day_qty_kg !== null && latest.prev_day_qty_kg !== undefined
+                    ? Number((latest.daily_quantity_kg - latest.prev_day_qty_kg).toFixed(2))
+                    : null;
+                  
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {/* Rolling 7-day Avg Card */}
+                      <div className="p-4 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] space-y-1">
+                        <div className="flex items-center justify-between text-xs font-semibold text-[#66736B]">
+                          <span>Rolling 7-Day Average</span>
+                          <span className="text-[10px] bg-[#DCEFE3] text-[#1F6F4A] px-2 py-0.5 rounded-full font-bold">AVG() OVER</span>
+                        </div>
+                        <div className="text-2xl font-bold text-[#17251E]">
+                          {latest.rolling_7day_avg_kg} <span className="text-xs font-normal text-[#66736B]">kg / day</span>
+                        </div>
+                        <p className="text-[11px] text-[#66736B]">7-day moving window average</p>
+                      </div>
+
+                      {/* Day-over-Day Shift (LAG) */}
+                      <div className="p-4 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] space-y-1">
+                        <div className="flex items-center justify-between text-xs font-semibold text-[#66736B]">
+                          <span>Day-over-Day Change</span>
+                          <span className="text-[10px] bg-[#EBF3FE] text-[#2563EB] px-2 py-0.5 rounded-full font-bold">LAG() OVER</span>
+                        </div>
+                        <div className="text-2xl font-bold text-[#17251E] flex items-center gap-1.5">
+                          {prevDayDiff !== null ? (
+                            <>
+                              {prevDayDiff > 0 ? (
+                                <>
+                                  <ArrowUpRight className="w-5 h-5 text-[#D9534F]" />
+                                  <span className="text-[#D9534F]">+{prevDayDiff}</span>
+                                </>
+                              ) : prevDayDiff < 0 ? (
+                                <>
+                                  <ArrowDownRight className="w-5 h-5 text-[#1F6F4A]" />
+                                  <span className="text-[#1F6F4A]">{prevDayDiff}</span>
+                                </>
+                              ) : (
+                                <span className="text-[#66736B]">0.00</span>
+                              )}
+                              <span className="text-xs font-normal text-[#66736B]">kg vs prev day</span>
+                            </>
+                          ) : (
+                            <span className="text-sm font-semibold text-[#66736B]">Initial Record</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[#66736B]">
+                          {latest.prev_day_qty_kg !== null ? `Prev day: ${latest.prev_day_qty_kg} kg` : 'First recorded entry'}
+                        </p>
+                      </div>
+
+                      {/* Cumulative Total Card */}
+                      <div className="p-4 rounded-[12px] bg-[#F8FAF6] border border-[#E3E9E4] space-y-1">
+                        <div className="flex items-center justify-between text-xs font-semibold text-[#66736B]">
+                          <span>Cumulative Consumed</span>
+                          <span className="text-[10px] bg-[#FEF3C7] text-[#D97706] px-2 py-0.5 rounded-full font-bold">SUM() OVER</span>
+                        </div>
+                        <div className="text-2xl font-bold text-[#17251E]">
+                          {latest.cumulative_qty_kg} <span className="text-xs font-normal text-[#66736B]">kg total</span>
+                        </div>
+                        <p className="text-[11px] text-[#66736B]">Running sum across all dates</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Detailed Window History Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#E3E9E4] text-[11px] font-bold text-[#66736B] uppercase tracking-wider bg-[#F8FAF6]">
+                        <th className="py-3 px-4">Log Date</th>
+                        <th className="py-3 px-4">Daily Consumed</th>
+                        <th className="py-3 px-4">Rolling 7-Day Avg (AVG OVER)</th>
+                        <th className="py-3 px-4">Prev Day (LAG)</th>
+                        <th className="py-3 px-4 text-right">Cumulative Total (SUM OVER)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E3E9E4] text-xs">
+                      {trendsData.map((row, idx) => {
+                        const dayDiff = row.prev_day_qty_kg !== null && row.prev_day_qty_kg !== undefined
+                          ? Number((row.daily_quantity_kg - row.prev_day_qty_kg).toFixed(2))
+                          : null;
+                        
+                        return (
+                          <tr key={idx} className="hover:bg-[#F8FAF6]/60 transition-colors">
+                            <td className="py-3.5 px-4 font-semibold text-[#17251E] flex items-center gap-2">
+                              <Calendar className="w-3.5 h-3.5 text-[#98A39D]" />
+                              <span>{row.date}</span>
+                            </td>
+                            <td className="py-3.5 px-4 font-bold text-[#17251E]">
+                              {row.daily_quantity_kg} kg
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className="font-semibold text-[#1F6F4A] bg-[#DCEFE3] px-2.5 py-0.5 rounded-full border border-[#7FAF8A]/40 text-[11px]">
+                                {row.rolling_7day_avg_kg} kg/day
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {dayDiff !== null ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[#66736B]">{row.prev_day_qty_kg} kg</span>
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                                    dayDiff > 0 ? 'bg-[#FDF2F2] text-[#D9534F]' : dayDiff < 0 ? 'bg-[#DCEFE3] text-[#1F6F4A]' : 'bg-[#F8FAF6] text-[#66736B]'
+                                  }`}>
+                                    {dayDiff > 0 ? `+${dayDiff}` : dayDiff}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[#98A39D] italic text-[11px]">— Initial record</span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-bold text-[#17251E]">
+                              {row.cumulative_qty_kg} kg
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Eco-Recognition & Percentile Rank Card */}
